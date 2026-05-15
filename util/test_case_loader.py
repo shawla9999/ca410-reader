@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 
 @dataclass
 class TestCase:
-    """A single test case from the Excel file."""
+    """A single test case from the Excel file or profile."""
     row: int                    # Excel row number (1-indexed)
     test_id: str                # 编号, e.g. "T001"
     image_mode: str             # 图像模式
@@ -19,6 +19,11 @@ class TestCase:
     hdr_sdr: str                # HDR/SDR
     window_brightness: float    # IRE Level (0-255)
     note: str                   # 备注
+    # Extended Murideo parameters (optional, used by profile-based tests)
+    timing: int | None = None           # 信号格式 ID, e.g. 34=3840x2160@60Hz
+    color_space: int | None = None      # 0=RGB(0-255), 1=RGB(16-235), 2=YC444, 3=YC422, 4=YC420
+    color_depth: int | None = None      # 0=8bit, 1=10bit, 2=12bit, 3=16bit
+    pattern: int | None = None          # 图案 ID, e.g. 26=Window, 11=White
 
 
 def load_test_cases(filepath: str | Path) -> list[TestCase]:

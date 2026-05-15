@@ -1,0 +1,24 @@
+{
+  "name": "SDR校准测试",
+  "description": "SDR模式灰阶校准，全屏白色+不同IRE级别",
+  "defaults": {
+    "timing": 34,
+    "color_space": 0,
+    "color_depth": 1,
+    "pattern": 26,
+    "hdr": 0,
+    "bt2020": 0,
+    "ire": 255,
+    "window_size": 100
+  },
+  "steps": [
+    {"ire": 255, "window_size": 100, "note": "SDR 100%白 100IRE"},
+    {"ire": 235, "window_size": 100, "note": "SDR 100%白 92IRE"},
+    {"ire": 200, "window_size": 100, "note": "SDR 100%白 78IRE"},
+    {"ire": 150, "window_size": 100, "note": "SDR 100%白 59IRE"},
+    {"ire": 100, "window_size": 100, "note": "SDR 100%白 39IRE"},
+    {"ire": 50,  "window_size": 100, "note": "SDR 100%白 20IRE"},
+    {"ire": 10,  "window_size": 100, "note": "SDR 100%白 4IRE"},
+    {"ire": 0,   "window_size": 100, "note": "SDR 100%黑 0IRE"}
+  ]
+}

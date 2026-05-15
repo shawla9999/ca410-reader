@@ -1,0 +1,25 @@
+{
+  "name": "HDR峰值亮度测试",
+  "description": "Boost峰值亮度标准测试方案，4K@60Hz HDR10，多窗口+多IRE",
+  "defaults": {
+    "timing": 34,
+    "color_space": 0,
+    "color_depth": 1,
+    "pattern": 26,
+    "hdr": 1,
+    "bt2020": 1,
+    "ire": 255,
+    "window_size": 100
+  },
+  "steps": [
+    {"hdr": 1, "bt2020": 1, "ire": 255, "window_size": 10, "note": "HDR10 10%窗口 100%IRE"},
+    {"hdr": 1, "bt2020": 1, "ire": 255, "window_size": 20, "note": "HDR10 20%窗口 100%IRE"},
+    {"hdr": 1, "bt2020": 1, "ire": 255, "window_size": 50, "note": "HDR10 50%窗口 100%IRE"},
+    {"hdr": 1, "bt2020": 1, "ire": 255, "window_size": 100, "note": "HDR10 100%窗口 100%IRE"},
+    {"hdr": 1, "bt2020": 1, "ire": 128, "window_size": 10, "note": "HDR10 10%窗口 50%IRE"},
+    {"hdr": 1, "bt2020": 1, "ire": 128, "window_size": 50, "note": "HDR10 50%窗口 50%IRE"},
+    {"hdr": 1, "bt2020": 1, "ire": 128, "window_size": 100, "note": "HDR10 100%窗口 50%IRE"},
+    {"hdr": 0, "bt2020": 0, "ire": 255, "window_size": 100, "note": "SDR 100%窗口 100%IRE"},
+    {"hdr": 0, "bt2020": 0, "ire": 128, "window_size": 100, "note": "SDR 100%窗口 50%IRE"}
+  ]
+}

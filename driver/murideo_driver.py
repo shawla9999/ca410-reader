@@ -213,20 +213,25 @@ class MurideoDriver:
     def set_ire_window(self, ire: int, window_size: int,
                        hdr_mode: int | None = None,
                        bt2020: int | None = None,
-                       color_depth: int | None = None) -> None:
+                       color_depth: int | None = None,
+                       timing: int | None = None,
+                       color_space: int | None = None,
+                       pattern_id: int | None = None) -> None:
         """Set HDR, IRE brightness level and window size in one connection.
 
         All commands are sent on a single WebSocket connection because
         the IRE mode state does not persist across connections.
 
         Sequence:
-        1. (optional) Set HDR mode
-        2. (optional) Set BT.2020
-        3. (optional) Set color depth
-        4. Send SENDOTHER||63739 to initialize IRE mode
-        5. Send Window pattern (SENDDOUBLE||98,26)
-        6. Wait 700ms
-        7. Send SENDOTHER||30971,{IRE},{window_size}
+        1. (optional) Set timing
+        2. (optional) Set color space
+        3. (optional) Set HDR mode
+        4. (optional) Set BT.2020
+        5. (optional) Set color depth
+        6. Send SENDOTHER||63739 to initialize IRE mode
+        7. Send Window pattern (SENDDOUBLE||98,26 or pattern_id)
+        8. Wait 700ms
+        9. Send SENDOTHER||30971,{IRE},{window_size}
 
         Args:
             ire: IRE brightness level (0-255, 255=full white)
@@ -234,12 +239,23 @@ class MurideoDriver:
             hdr_mode: Optional HDR mode (0=SDR, 1=HDR10, 2=HLG)
             bt2020: Optional BT.2020 (0=disable, 1=enable)
             color_depth: Optional color depth (0=8bit, 1=10bit, 2=12bit)
+            timing: Optional timing ID (e.g. 34=3840x2160@60Hz)
+            color_space: Optional color space (0=RGB0-255, 1=RGB16-235, 2-4=YC)
+            pattern_id: Optional pattern ID (default 26=Window)
         """
         self._ensure_connected()
         ire = max(0, min(255, int(ire)))
         window_size = max(0, min(100, int(window_size)))
         commands = []
         delays = []
+        # Optional: Timing
+        if timing is not None:
+            commands.append(_build_sendsingle(CAT_TIMING, timing))
+            delays.append(0)
+        # Optional: Color space
+        if color_space is not None:
+            commands.append(_build_sendsingle(CAT_COLOR_SPACE, color_space))
+            delays.append(0)
         # Optional: HDR mode
         if hdr_mode is not None:
             commands.append(_build_sendsingle(CAT_HDR, hdr_mode))
@@ -255,8 +271,9 @@ class MurideoDriver:
         # IRE init (must be sent each time)
         commands.append(f'\r\nSENDOTHER||{CAT_IRE_INIT}\r\n')
         delays.append(0)
-        # Window pattern
-        commands.append(_build_senddouble(CAT_PATTERN, PATTERN_WINDOW))
+        # Window pattern (or custom pattern)
+        pid = pattern_id if pattern_id is not None else PATTERN_WINDOW
+        commands.append(_build_senddouble(CAT_PATTERN, pid))
         delays.append(0)
         # IRE + window size (after 700ms delay)
         commands.append(f'\r\nSENDOTHER||{CAT_IRE_WINDOW},{ire},{window_size}\r\n')

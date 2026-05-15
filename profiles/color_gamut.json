@@ -1,0 +1,27 @@
+{
+  "name": "色域测试",
+  "description": "红绿蓝纯色图案测试色域覆盖，HDR10+BT.2020",
+  "defaults": {
+    "timing": 34,
+    "color_space": 0,
+    "color_depth": 1,
+    "pattern": 26,
+    "hdr": 1,
+    "bt2020": 1,
+    "ire": 255,
+    "window_size": 100
+  },
+  "steps": [
+    {"pattern": 4,  "window_size": 100, "note": "红色全屏"},
+    {"pattern": 5,  "window_size": 100, "note": "绿色全屏"},
+    {"pattern": 6,  "window_size": 100, "note": "蓝色全屏"},
+    {"pattern": 7,  "window_size": 100, "note": "青色全屏"},
+    {"pattern": 8,  "window_size": 100, "note": "品红全屏"},
+    {"pattern": 9,  "window_size": 100, "note": "黄色全屏"},
+    {"pattern": 11, "window_size": 100, "note": "白色全屏"},
+    {"pattern": 10, "window_size": 100, "note": "黑色全屏"},
+    {"pattern": 4,  "window_size": 10,  "note": "红色10%窗口"},
+    {"pattern": 5,  "window_size": 10,  "note": "绿色10%窗口"},
+    {"pattern": 6,  "window_size": 10,  "note": "蓝色10%窗口"}
+  ]
+}

@@ -14,14 +14,16 @@ from driver.murideo_driver import (
     HDR_OFF, HDR_HDR10,
 )
 from worker import measurement_worker as mw
-from worker.auto_test_worker import AutoTestWorker, AUTO_TEST_STARTED, AUTO_TEST_PROGRESS, AUTO_TEST_CASE_DONE, AUTO_TEST_ALL_DONE, AUTO_TEST_ERROR, AUTO_TEST_STOPPED
+from worker.auto_test_worker import AutoTestWorker, AUTO_TEST_STARTED, AUTO_TEST_PROGRESS, AUTO_TEST_CASE_DONE, AUTO_TEST_ALL_DONE, AUTO_TEST_ERROR, AUTO_TEST_STOPPED, profile_to_test_cases
 from ui.connection_panel import ConnectionPanel
 from ui.measurement_panel import MeasurementPanel
+from ui.murideo_panel import MurideoPanel
 from ui.control_panel import ControlPanel
 from ui.history_panel import HistoryPanel
 from util.excel_exporter import export_to_excel
 from util.test_case_loader import load_test_cases
 from util.config import AppConfig
+from util.profile import TestProfile
 
 MURIDEO_CONNECTED = 'murideo_connected'
 MURIDEO_DISCONNECTED = 'murideo_disconnected'
@@ -48,6 +50,7 @@ class MainWindow:
         self._auto_testing = False
         self._manual_cases: list = []
         self._manual_case_index = 0
+        self._loaded_profile: TestProfile | None = None
 
         self._setup_window()
         self._create_widgets()
@@ -64,32 +67,39 @@ class MainWindow:
         self._conn_panel = ConnectionPanel(self._root, self._worker)
         self._conn_panel.grid(row=0, column=0, columnspan=2, sticky='ew', padx=5, pady=5)
 
-        # Row 1: Measurement panel (left) + Control panel (right)
+        # Row 1: Measurement panel (compact, full width)
         self._meas_panel = MeasurementPanel(self._root)
-        self._meas_panel.grid(row=1, column=0, sticky='nsew', padx=5, pady=5)
+        self._meas_panel.grid(row=1, column=0, columnspan=2, sticky='ew', padx=5, pady=2)
+
+        # Row 2: MurideoPanel (left) + ControlPanel (right)
+        self._murideo_panel = MurideoPanel(self._root)
+        self._murideo_panel.grid(row=2, column=0, sticky='nsew', padx=5, pady=5)
 
         self._ctrl_panel = ControlPanel(self._root, self._worker)
-        self._ctrl_panel.grid(row=1, column=1, sticky='ns', padx=5, pady=5)
+        self._ctrl_panel.grid(row=2, column=1, sticky='nsew', padx=5, pady=5)
 
-        # Row 2: History panel
+        # Row 3: History panel
         self._history_panel = HistoryPanel(self._root)
-        self._history_panel.grid(row=2, column=0, columnspan=2, sticky='nsew', padx=5, pady=5)
+        self._history_panel.grid(row=3, column=0, columnspan=2, sticky='nsew', padx=5, pady=5)
 
         # Grid weights
-        self._root.columnconfigure(0, weight=3)
+        self._root.columnconfigure(0, weight=1)
         self._root.columnconfigure(1, weight=1)
-        self._root.rowconfigure(1, weight=2)
-        self._root.rowconfigure(2, weight=1)
+        self._root.rowconfigure(2, weight=2)
+        self._root.rowconfigure(3, weight=1)
 
         # Wire Murideo callbacks
-        self._ctrl_panel.set_murideo_connect_callback(self._on_murideo_connect)
-        self._ctrl_panel.set_murideo_disconnect_callback(self._on_murideo_disconnect)
-        self._ctrl_panel.set_murideo_set_callback(self._on_murideo_set)
+        self._murideo_panel.set_murideo_connect_callback(self._on_murideo_connect)
+        self._murideo_panel.set_murideo_disconnect_callback(self._on_murideo_disconnect)
+        self._murideo_panel.set_murideo_set_callback(self._on_murideo_set)
 
         # Wire auto-test callbacks
         self._ctrl_panel.set_autotest_start_callback(self._on_autotest_start)
         self._ctrl_panel.set_autotest_pause_callback(self._on_autotest_pause)
         self._ctrl_panel.set_autotest_stop_callback(self._on_autotest_stop)
+
+        # Wire profile callback
+        self._ctrl_panel.set_profile_load_callback(self._on_profile_loaded)
 
         # Wire auto-test measure callback
         self._auto_test.set_measure_callback(self._on_autotest_measure)
@@ -102,7 +112,7 @@ class MainWindow:
         if self._config.window_geometry:
             self._root.geometry(self._config.window_geometry)
         if self._config.murideo_host:
-            self._ctrl_panel.set_murideo_host(self._config.murideo_host)
+            self._murideo_panel.set_murideo_host(self._config.murideo_host)
 
     def _poll_queue(self):
         while True:
@@ -115,18 +125,16 @@ class MainWindow:
         self._root.after(self.QUEUE_POLL_MS, self._poll_queue)
 
     def _attach_user_inputs(self, result) -> None:
-        """Attach user-input metadata to result."""
         result.image_mode = self._ctrl_panel.get_image_mode()
-        result.window_ratio = self._ctrl_panel.get_window_ratio()
-        result.window_brightness = self._ctrl_panel.get_window_brightness()
+        result.window_ratio = self._murideo_panel.get_window_ratio()
+        result.window_brightness = self._murideo_panel.get_window_brightness()
         result.peak_brightness = self._ctrl_panel.get_peak_brightness()
         result.backlight_value = self._ctrl_panel.get_backlight_value()
         result.local_dimming = self._ctrl_panel.get_local_dimming()
-        result.hdr_sdr = self._ctrl_panel.get_hdr_sdr()
+        result.hdr_sdr = self._murideo_panel.get_hdr_sdr()
         result.note = self._ctrl_panel.get_note()
 
     def _result_to_excel_record(self, result) -> dict:
-        """Convert a measurement result to a dict matching Excel headers."""
         if isinstance(result, TduvLvResult):
             x_val = ''
             y_val = ''
@@ -150,7 +158,6 @@ class MainWindow:
         }
 
     def _auto_write_excel(self, result) -> None:
-        """Write measurement to Excel if the checkbox is enabled."""
         if not self._ctrl_panel.is_excel_write_enabled():
             return
         filepath = self._ctrl_panel.get_excel_path()
@@ -174,7 +181,7 @@ class MainWindow:
     def _handle_result(self, msg_type: str, data) -> None:
         if msg_type in (mw.RESULT_SINGLE, mw.RESULT_CONTINUOUS):
             # Auto-set Murideo before measurement (manual mode)
-            if self._ctrl_panel.is_murideo_auto_set() and self._murideo.is_connected and not self._auto_testing:
+            if self._murideo_panel.is_murideo_auto_set() and self._murideo.is_connected and not self._auto_testing:
                 self._auto_set_murideo()
             self._attach_user_inputs(data)
             self._meas_panel.update_values(data)
@@ -209,11 +216,11 @@ class MainWindow:
 
         # -- Murideo events --
         elif msg_type == MURIDEO_CONNECTED:
-            self._ctrl_panel.set_murideo_connected(True)
+            self._murideo_panel.set_murideo_connected(True)
             self._ctrl_panel.show_error(f'Murideo 已连接 ({data})')
 
         elif msg_type == MURIDEO_DISCONNECTED:
-            self._ctrl_panel.set_murideo_connected(False)
+            self._murideo_panel.set_murideo_connected(False)
 
         elif msg_type == MURIDEO_SET_RESULT:
             self._ctrl_panel.show_error(data)
@@ -230,7 +237,17 @@ class MainWindow:
             index = data['index']
             total = data['total']
             case = data['case']
-            # Update UI fields from test case
+            # Update Murideo panel fields from test case
+            self._murideo_panel.set_window_ratio_value(case.window_size)
+            self._murideo_panel.set_window_brightness_value(case.window_brightness)
+            if case.hdr_sdr:
+                # Find matching HDR_SDR_MODES value
+                from driver.ca410_types import HDR_SDR_MODES
+                for m in HDR_SDR_MODES:
+                    if m == case.hdr_sdr:
+                        self._murideo_panel._hdr_sdr_var.set(m)
+                        break
+            # Update TV param fields from test case
             self._ctrl_panel.set_test_case_fields(case)
             self._ctrl_panel.set_autotest_progress(index, total, case)
             # Auto-enable Excel write
@@ -257,7 +274,7 @@ class MainWindow:
     # -- Murideo operations ---------------------------------------------------
 
     def _on_murideo_connect(self) -> None:
-        host = self._ctrl_panel.get_murideo_host()
+        host = self._murideo_panel.get_murideo_host()
         t = threading.Thread(target=self._run_murideo_connect, args=(host,), daemon=True)
         t.start()
 
@@ -272,24 +289,30 @@ class MainWindow:
         if not self._murideo.is_connected:
             self._ctrl_panel.show_error('Murideo 未连接')
             return
-        if self._ctrl_panel.is_murideo_auto_set():
-            # Auto mode: lookup test case and display in UI
+        if self._murideo_panel.is_murideo_auto_set():
             case = self._get_current_test_case()
             if case is None:
                 self._ctrl_panel.show_error('未找到测试用例，请先选择Excel文件')
                 return
+            self._murideo_panel.set_window_ratio_value(case.window_size)
+            self._murideo_panel.set_window_brightness_value(case.window_brightness)
             self._ctrl_panel.set_test_case_fields(case)
             self._manual_case_index += 1
             hdr_sdr = case.hdr_sdr
             window_size = case.window_size
             brightness = case.window_brightness
+            timing = case.timing
+            color_space = case.color_space
+            pattern = case.pattern
         else:
-            # Manual mode: validate UI fields
-            window_size = self._ctrl_panel.get_window_ratio()
-            hdr_sdr = self._ctrl_panel.get_hdr_sdr()
-            brightness = self._ctrl_panel.get_window_brightness()
-            logger.info('Manual Murideo set: window_size=%s, hdr_sdr=%s, brightness=%s',
-                        window_size, hdr_sdr, brightness)
+            window_size = self._murideo_panel.get_window_ratio()
+            hdr_sdr = self._murideo_panel.get_hdr_sdr()
+            brightness = self._murideo_panel.get_window_brightness()
+            timing = self._murideo_panel.get_timing()
+            color_space = self._murideo_panel.get_color_space()
+            pattern = self._murideo_panel.get_pattern()
+            logger.info('Manual Murideo set: ws=%s, hdr=%s, ire=%s, timing=%s, cs=%s, pat=%s',
+                        window_size, hdr_sdr, brightness, timing, color_space, pattern)
             errors = []
             if window_size is None:
                 errors.append('小窗口大小')
@@ -302,13 +325,12 @@ class MainWindow:
                 return
         t = threading.Thread(
             target=self._run_murideo_set,
-            args=(hdr_sdr, window_size, brightness),
+            args=(hdr_sdr, window_size, brightness, timing, color_space, pattern),
             daemon=True,
         )
         t.start()
 
     def _get_current_test_case(self):
-        """Get the current test case for manual mode."""
         if self._auto_testing and self._auto_test.current_case:
             return self._auto_test.current_case
         if not self._manual_cases:
@@ -333,23 +355,33 @@ class MainWindow:
             self._queue.put((MURIDEO_ERROR, f'Murideo 连接失败: {e}'))
 
     def _run_murideo_set(self, hdr_sdr: str, window_size: float | None,
-                         brightness: float | None) -> None:
+                         brightness: float | None,
+                         timing: int | None = None,
+                         color_space: int | None = None,
+                         pattern_id: int | None = None) -> None:
         try:
             parts = []
             hdr_map = {'HDR': HDR_HDR10, 'SDR': HDR_OFF}
             hdr_mode = hdr_map.get(hdr_sdr)
             ire = int(brightness) if brightness is not None else 255
-            # Set IRE window + HDR in one connection
             if window_size is not None:
                 try:
                     self._murideo.set_ire_window(
                         ire=ire, window_size=int(window_size),
                         hdr_mode=hdr_mode,
+                        timing=timing, color_space=color_space,
+                        pattern_id=pattern_id,
                     )
                     if hdr_mode is not None:
                         parts.append(f'HDR={hdr_sdr}')
                     parts.append(f'窗口{window_size:.0f}%')
                     parts.append(f'IRE={ire}')
+                    if timing is not None:
+                        parts.append(f'Timing={timing}')
+                    if color_space is not None:
+                        parts.append(f'CS={color_space}')
+                    if pattern_id is not None:
+                        parts.append(f'Pat={pattern_id}')
                 except MurideoError as e:
                     parts.append(f'IRE/窗口: {e}')
             else:
@@ -372,18 +404,19 @@ class MainWindow:
             self._queue.put((MURIDEO_ERROR, f'Murideo 设置失败: {e}'))
 
     def _auto_set_murideo(self) -> None:
-        """Auto-set Murideo before manual measurement (non-blocking)."""
-        hdr_sdr = self._ctrl_panel.get_hdr_sdr()
-        if self._ctrl_panel.is_murideo_auto_set():
+        hdr_sdr = self._murideo_panel.get_hdr_sdr()
+        if self._murideo_panel.is_murideo_auto_set():
             case = self._get_current_test_case()
             if case:
+                self._murideo_panel.set_window_ratio_value(case.window_size)
+                self._murideo_panel.set_window_brightness_value(case.window_brightness)
                 self._ctrl_panel.set_test_case_fields(case)
                 hdr_sdr = case.hdr_sdr
                 self._manual_case_index += 1
         hdr_map = {'HDR': HDR_HDR10, 'SDR': HDR_OFF}
         hdr_mode = hdr_map.get(hdr_sdr)
-        window_size = self._ctrl_panel.get_window_ratio()
-        brightness = self._ctrl_panel.get_window_brightness()
+        window_size = self._murideo_panel.get_window_ratio()
+        brightness = self._murideo_panel.get_window_brightness()
         t = threading.Thread(
             target=self._run_murideo_auto_set,
             args=(hdr_mode, window_size, brightness),
@@ -407,10 +440,29 @@ class MainWindow:
 
     # -- Auto-test operations --------------------------------------------------
 
+    def _on_profile_loaded(self, profile: TestProfile) -> None:
+        self._loaded_profile = profile
+        # Update Murideo panel defaults from profile
+        defaults = profile.defaults
+        if 'timing' in defaults:
+            self._murideo_panel.set_timing_value(defaults['timing'])
+        if 'color_space' in defaults:
+            self._murideo_panel.set_color_space_value(defaults['color_space'])
+        if 'pattern' in defaults:
+            self._murideo_panel.set_pattern_value(defaults['pattern'])
+        self._ctrl_panel.show_error(f'已加载方案: {profile.name} ({len(profile.steps)} 步)')
+
     def _on_autotest_start(self) -> None:
+        if self._loaded_profile and self._loaded_profile.steps:
+            cases = profile_to_test_cases(self._loaded_profile)
+            self._auto_test.configure(cases, '', profile=self._loaded_profile)
+            self._auto_test.start()
+            self._ctrl_panel.show_error(f'自动测试开始[方案]: {len(cases)} 步')
+            return
+
         filepath = self._ctrl_panel.get_excel_path()
         if not filepath:
-            self._ctrl_panel.show_error('请先选择测试用例Excel文件')
+            self._ctrl_panel.show_error('请先加载测试方案或选择Excel文件')
             return
 
         try:
@@ -425,13 +477,12 @@ class MainWindow:
 
         self._auto_test.configure(cases, filepath)
         self._auto_test.start()
-        self._ctrl_panel.show_error(f'自动测试开始: {len(cases)} 条用例')
+        self._ctrl_panel.show_error(f'自动测试开始[Excel]: {len(cases)} 条用例')
 
     def _on_autotest_pause(self) -> None:
         if self._auto_test.is_paused:
             self._auto_test.resume()
             self._ctrl_panel.set_autotest_state(running=True, paused=False)
-            # Resume also triggers the next measurement
             self._auto_test.advance()
         else:
             self._auto_test.pause()
@@ -445,7 +496,6 @@ class MainWindow:
         self._ctrl_panel.show_error('自动测试已停止')
 
     def _on_autotest_measure(self) -> None:
-        """Called by AutoTestWorker to trigger a CA-410 measurement."""
         self._worker.measure_single(mode=self._ctrl_panel.get_mode())
 
     # -- window close ----------------------------------------------------------
@@ -463,7 +513,7 @@ class MainWindow:
             self._ctrl_panel.get_mode(), 'xyLv'
         )
         self._config.continuous_interval = self._ctrl_panel.get_interval()
-        self._config.murideo_host = self._ctrl_panel.get_murideo_host()
+        self._config.murideo_host = self._murideo_panel.get_murideo_host()
         try:
             self._config.window_geometry = self._root.geometry()
         except Exception:

@@ -1,0 +1,24 @@
+{
+  "name": "杜比视界/HLG测试",
+  "description": "HLG模式 + DVS HLG图案测试",
+  "defaults": {
+    "timing": 34,
+    "color_space": 0,
+    "color_depth": 1,
+    "pattern": 26,
+    "hdr": 2,
+    "bt2020": 1,
+    "ire": 255,
+    "window_size": 100
+  },
+  "steps": [
+    {"hdr": 2, "pattern": 26, "window_size": 10,  "ire": 255, "note": "HLG Window 10%"},
+    {"hdr": 2, "pattern": 26, "window_size": 50,  "ire": 255, "note": "HLG Window 50%"},
+    {"hdr": 2, "pattern": 26, "window_size": 100, "ire": 255, "note": "HLG Window 100%"},
+    {"hdr": 2, "pattern": 26, "window_size": 10,  "ire": 128, "note": "HLG Window 10% 50%IRE"},
+    {"hdr": 2, "pattern": 26, "window_size": 100, "ire": 128, "note": "HLG Window 100% 50%IRE"},
+    {"hdr": 2, "pattern": 511, "window_size": 100, "ire": 255, "note": "HLG DVS BlackLevel1"},
+    {"hdr": 2, "pattern": 513, "window_size": 100, "ire": 255, "note": "HLG DVS WhiteLevel1"},
+    {"hdr": 2, "pattern": 517, "window_size": 100, "ire": 255, "note": "HLG DVS HDR Mix"}
+  ]
+}

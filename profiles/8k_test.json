@@ -1,0 +1,22 @@
+{
+  "name": "8K信号测试",
+  "description": "8K@60Hz HDR10峰值亮度测试",
+  "defaults": {
+    "timing": 115,
+    "color_space": 0,
+    "color_depth": 1,
+    "pattern": 26,
+    "hdr": 1,
+    "bt2020": 1,
+    "ire": 255,
+    "window_size": 100
+  },
+  "steps": [
+    {"timing": 115, "hdr": 1, "bt2020": 1, "ire": 255, "window_size": 10,  "note": "8K@60Hz HDR10 10%窗口"},
+    {"timing": 115, "hdr": 1, "bt2020": 1, "ire": 255, "window_size": 50,  "note": "8K@60Hz HDR10 50%窗口"},
+    {"timing": 115, "hdr": 1, "bt2020": 1, "ire": 255, "window_size": 100, "note": "8K@60Hz HDR10 100%窗口"},
+    {"timing": 110, "hdr": 1, "bt2020": 1, "ire": 255, "window_size": 10,  "note": "8K@30Hz HDR10 10%窗口"},
+    {"timing": 110, "hdr": 1, "bt2020": 1, "ire": 255, "window_size": 100, "note": "8K@30Hz HDR10 100%窗口"},
+    {"timing": 115, "hdr": 0, "bt2020": 0, "ire": 255, "window_size": 100, "note": "8K@60Hz SDR 100%窗口"}
+  ]
+}

@@ -20,6 +20,7 @@ from driver.murideo_driver import (
 )
 from util.test_case_loader import TestCase
 from util.excel_exporter import export_to_excel
+from util.profile import TestProfile
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,34 @@ AUTO_TEST_ALL_DONE = 'auto_test_all_done'
 AUTO_TEST_ERROR = 'auto_test_error'
 AUTO_TEST_PAUSED = 'auto_test_paused'
 AUTO_TEST_STOPPED = 'auto_test_stopped'
+
+
+def profile_to_test_cases(profile: TestProfile) -> list[TestCase]:
+    """Convert a TestProfile's steps into TestCase objects.
+
+    Each step inherits defaults from the profile for missing fields.
+    """
+    cases = []
+    for i, step in enumerate(profile.steps):
+        resolved = step.resolved(profile.defaults)
+        hdr_sdr = 'HDR' if resolved.get('hdr', 0) != 0 else 'SDR'
+        cases.append(TestCase(
+            row=0,
+            test_id=f'P{i + 1:03d}',
+            image_mode='',
+            peak_brightness='',
+            backlight_value=0,
+            local_dimming='',
+            window_size=resolved.get('window_size', 100),
+            hdr_sdr=hdr_sdr,
+            window_brightness=resolved.get('ire', 255),
+            note=step.note,
+            timing=resolved.get('timing'),
+            color_space=resolved.get('color_space'),
+            color_depth=resolved.get('color_depth'),
+            pattern=resolved.get('pattern'),
+        ))
+    return cases
 
 
 class AutoTestWorker:
@@ -52,6 +81,7 @@ class AutoTestWorker:
         self._thread: threading.Thread | None = None
         self._measure_callback = None  # Set by MainWindow
         self._excel_path = ''
+        self._profile: TestProfile | None = None
 
     @property
     def is_running(self) -> bool:
@@ -76,10 +106,12 @@ class AutoTestWorker:
         return None
 
     def configure(self, cases: list[TestCase], excel_path: str,
-                  start_index: int = 0) -> None:
+                  start_index: int = 0,
+                  profile: TestProfile | None = None) -> None:
         self._cases = cases
         self._excel_path = excel_path
         self._current_index = start_index
+        self._profile = profile
 
     def set_measure_callback(self, callback) -> None:
         """Set callback to trigger CA-410 measurement from the worker thread."""
@@ -169,24 +201,40 @@ class AutoTestWorker:
         }))
 
     def _set_murideo(self, case: TestCase) -> None:
-        """Set Murideo parameters for a test case."""
+        """Set Murideo parameters for a test case.
+
+        Uses extended TestCase fields (timing, color_space, pattern) when
+        available; falls back to legacy hdr_sdr-based logic otherwise.
+        """
         if not self._murideo.is_connected:
             logger.warning('Murideo not connected, skipping device setup')
             return
 
         try:
-            hdr_mode = HDR_HDR10 if case.hdr_sdr == 'HDR' else HDR_OFF
-            bt2020 = 1 if case.hdr_sdr == 'HDR' else 0
+            # Determine HDR mode: prefer explicit field, else derive from hdr_sdr
+            if case.hdr_sdr == 'HDR' or case.hdr_sdr == 'HLG':
+                hdr_mode = HDR_HDR10
+            else:
+                hdr_mode = HDR_OFF
 
-            # Set HDR + IRE window size in one connection
+            bt2020 = 1 if case.hdr_sdr == 'HDR' else 0
             ire = int(case.window_brightness) if case.window_brightness else 255
+
+            # Use extended fields if set, otherwise sensible defaults
+            timing = case.timing
+            color_space = case.color_space
+            color_depth = case.color_depth if case.color_depth is not None else 1
+            pattern_id = case.pattern
+
             self._murideo.set_ire_window(
                 ire=ire, window_size=int(case.window_size),
-                hdr_mode=hdr_mode, bt2020=bt2020, color_depth=1,
+                hdr_mode=hdr_mode, bt2020=bt2020, color_depth=color_depth,
+                timing=timing, color_space=color_space, pattern_id=pattern_id,
             )
 
-            logger.info('Murideo set: HDR/SDR=%s, 窗口%d%%, IRE=%d',
-                        case.hdr_sdr, int(case.window_size), ire)
+            logger.info('Murideo set: HDR/SDR=%s, 窗口%d%%, IRE=%d, timing=%s, cs=%s, pat=%s',
+                        case.hdr_sdr, int(case.window_size), ire,
+                        timing, color_space, pattern_id)
         except MurideoError as e:
             logger.error('Failed to set Murideo: %s', e)
             self._queue.put((AUTO_TEST_ERROR, f'Murideo 设置失败: {e}'))
