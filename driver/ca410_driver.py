@@ -71,6 +71,7 @@ class CA410Driver:
             resp = self._read_response()
             self._check_ok(resp)
             self._in_remote_mode = True
+            self._current_mode = MeasurementMode.XY_LV
             logger.info('Entered remote mode')
         except CA410Error:
             self._serial.close()
@@ -106,10 +107,14 @@ class CA410Driver:
     def set_mode(self, mode: MeasurementMode) -> None:
         """Set measurement display mode."""
         self._ensure_connected()
+        if self._current_mode == mode:
+            return
         self._send_command(f'MDS,{mode.value}')
         resp = self._read_response()
         self._check_ok(resp)
         self._current_mode = mode
+        import time
+        time.sleep(0.1)
         logger.info('Mode set to %s', mode.name)
 
     def measure(self) -> XyLvResult | TduvLvResult:

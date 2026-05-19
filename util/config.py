@@ -1,11 +1,19 @@
 import json
 import os
+import sys
+
+
+def _app_data_dir() -> str:
+    if sys.platform == 'win32':
+        base = os.environ.get('APPDATA', os.path.expanduser('~'))
+        return os.path.join(base, 'ca410_reader')
+    return os.path.expanduser('~/.ca410_reader')
 
 
 class AppConfig:
     """Persistent user preferences."""
 
-    CONFIG_DIR = os.path.expanduser('~/.ca410_reader')
+    CONFIG_DIR = _app_data_dir()
     CONFIG_FILE = 'config.json'
 
     DEFAULTS = {
@@ -14,6 +22,9 @@ class AppConfig:
         'continuous_interval': 1.0,
         'window_geometry': '900x650',
         'murideo_host': '192.168.1.239',
+        'murideo_transport': 'websocket',
+        'murideo_serial_port': '',
+        'murideo_serial_baudrate': 115200,
     }
 
     def __init__(self):
@@ -58,6 +69,30 @@ class AppConfig:
     @murideo_host.setter
     def murideo_host(self, value: str) -> None:
         self._data['murideo_host'] = value
+
+    @property
+    def murideo_transport(self) -> str:
+        return self._data.get('murideo_transport', 'websocket')
+
+    @murideo_transport.setter
+    def murideo_transport(self, value: str) -> None:
+        self._data['murideo_transport'] = value
+
+    @property
+    def murideo_serial_port(self) -> str:
+        return self._data.get('murideo_serial_port', '')
+
+    @murideo_serial_port.setter
+    def murideo_serial_port(self, value: str) -> None:
+        self._data['murideo_serial_port'] = value
+
+    @property
+    def murideo_serial_baudrate(self) -> int:
+        return self._data.get('murideo_serial_baudrate', 115200)
+
+    @murideo_serial_baudrate.setter
+    def murideo_serial_baudrate(self, value: int) -> None:
+        self._data['murideo_serial_baudrate'] = value
 
     @classmethod
     def load(cls) -> 'AppConfig':

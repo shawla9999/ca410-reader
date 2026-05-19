@@ -32,6 +32,21 @@ AUTO_TEST_ALL_DONE = 'auto_test_all_done'
 AUTO_TEST_ERROR = 'auto_test_error'
 AUTO_TEST_PAUSED = 'auto_test_paused'
 AUTO_TEST_STOPPED = 'auto_test_stopped'
+AUTO_TEST_TV_CONFIRM = 'auto_test_tv_confirm'
+
+
+# TV-related fields that require manual adjustment on the TV
+_TV_PARAMS = ('image_mode', 'peak_brightness', 'backlight_value', 'local_dimming')
+
+
+def _tv_params_changed(prev: TestCase | None, curr: TestCase) -> bool:
+    """Check if TV-related parameters differ between two test cases."""
+    if prev is None:
+        return True
+    for field in _TV_PARAMS:
+        if getattr(prev, field, None) != getattr(curr, field, None):
+            return True
+    return False
 
 
 def profile_to_test_cases(profile: TestProfile) -> list[TestCase]:
@@ -82,6 +97,11 @@ class AutoTestWorker:
         self._measure_callback = None  # Set by MainWindow
         self._excel_path = ''
         self._profile: TestProfile | None = None
+        self._settle_delay = 3.0
+        self._step_delay = 2.0
+        self._tv_confirm_event = threading.Event()
+        self._prev_case: TestCase | None = None
+        self._prev_murideo_params: dict = {}  # Track last-sent Murideo params
 
     @property
     def is_running(self) -> bool:
@@ -112,10 +132,24 @@ class AutoTestWorker:
         self._excel_path = excel_path
         self._current_index = start_index
         self._profile = profile
+        self._prev_murideo_params = {}
+        self._prev_case = None
 
     def set_measure_callback(self, callback) -> None:
         """Set callback to trigger CA-410 measurement from the worker thread."""
         self._measure_callback = callback
+
+    def set_settle_delay(self, seconds: float) -> None:
+        """Set delay between Murideo setup and CA-410 measurement."""
+        self._settle_delay = max(0, seconds)
+
+    def set_step_delay(self, seconds: float) -> None:
+        """Set delay between measurement result and next Murideo setup."""
+        self._step_delay = max(0, seconds)
+
+    def confirm_tv_params(self) -> None:
+        """Signal that user has confirmed TV parameters."""
+        self._tv_confirm_event.set()
 
     def start(self) -> None:
         if self._running:
@@ -143,6 +177,8 @@ class AutoTestWorker:
         self._pause_event.clear()  # Unblock if paused
         self._running = False
         self._paused = False
+        self._prev_murideo_params = {}
+        self._prev_case = None
 
     def advance(self) -> None:
         """Signal that the current measurement is done and we should advance.
@@ -166,6 +202,20 @@ class AutoTestWorker:
 
             case = self._cases[self._current_index]
 
+            # Step 0: Check if TV params changed, ask user to confirm
+            if _tv_params_changed(self._prev_case, case):
+                self._queue.put((AUTO_TEST_TV_CONFIRM, {
+                    'index': self._current_index,
+                    'case': case,
+                }))
+                self._tv_confirm_event.wait()
+                self._tv_confirm_event.clear()
+                if self._stop_event.is_set():
+                    self._queue.put((AUTO_TEST_STOPPED, None))
+                    self._running = False
+                    return
+            self._prev_case = case
+
             # Step 1: Set Murideo parameters
             self._set_murideo(case)
 
@@ -175,6 +225,25 @@ class AutoTestWorker:
                 'total': len(self._cases),
                 'case': case,
             }))
+
+            # Step 2.5: Wait for display to settle after changing Murideo settings
+            if self._settle_delay > 0:
+                self._queue.put((AUTO_TEST_PROGRESS, {
+                    'index': self._current_index,
+                    'total': len(self._cases),
+                    'case': case,
+                }))
+                logger.info('Waiting %.1fs for display to settle...', self._settle_delay)
+                # Sleep in small increments so stop_event can interrupt
+                remaining = self._settle_delay
+                while remaining > 0:
+                    if self._stop_event.is_set():
+                        self._queue.put((AUTO_TEST_STOPPED, None))
+                        self._running = False
+                        return
+                    chunk = min(0.5, remaining)
+                    time.sleep(chunk)
+                    remaining -= chunk
 
             # Step 3: Trigger CA-410 measurement
             if self._measure_callback:
@@ -192,7 +261,20 @@ class AutoTestWorker:
                 self._running = False
                 return
 
-            # Step 5: Move to next case
+            # Step 5: Wait before moving to next case
+            if self._step_delay > 0 and self._current_index < len(self._cases) - 1:
+                logger.info('Waiting %.1fs before next step...', self._step_delay)
+                remaining = self._step_delay
+                while remaining > 0:
+                    if self._stop_event.is_set():
+                        self._queue.put((AUTO_TEST_STOPPED, None))
+                        self._running = False
+                        return
+                    chunk = min(0.5, remaining)
+                    time.sleep(chunk)
+                    remaining -= chunk
+
+            # Step 6: Move to next case
             self._current_index += 1
 
         self._running = False
@@ -203,15 +285,16 @@ class AutoTestWorker:
     def _set_murideo(self, case: TestCase) -> None:
         """Set Murideo parameters for a test case.
 
-        Uses extended TestCase fields (timing, color_space, pattern) when
-        available; falls back to legacy hdr_sdr-based logic otherwise.
+        Only sends commands for parameters that changed from the previous step,
+        reducing the number of commands and total time significantly.
+        IRE init + Window pattern + IRE/window size are always sent.
         """
         if not self._murideo.is_connected:
             logger.warning('Murideo not connected, skipping device setup')
             return
 
         try:
-            # Determine HDR mode: prefer explicit field, else derive from hdr_sdr
+            # Determine current parameters
             if case.hdr_sdr == 'HDR' or case.hdr_sdr == 'HLG':
                 hdr_mode = HDR_HDR10
             else:
@@ -220,21 +303,41 @@ class AutoTestWorker:
             bt2020 = 1 if case.hdr_sdr == 'HDR' else 0
             ire = int(case.window_brightness) if case.window_brightness else 255
 
-            # Use extended fields if set, otherwise sensible defaults
-            timing = case.timing
-            color_space = case.color_space
-            color_depth = case.color_depth if case.color_depth is not None else 1
-            pattern_id = case.pattern
+            # Current parameter set
+            current_params = {
+                'hdr_mode': hdr_mode,
+                'bt2020': bt2020,
+                'color_depth': case.color_depth if case.color_depth is not None else 1,
+                'timing': case.timing,
+                'color_space': case.color_space,
+                'pattern_id': case.pattern,
+            }
 
-            self._murideo.set_ire_window(
-                ire=ire, window_size=int(case.window_size),
-                hdr_mode=hdr_mode, bt2020=bt2020, color_depth=color_depth,
-                timing=timing, color_space=color_space, pattern_id=pattern_id,
-            )
+            # Only include parameters that changed from previous step
+            prev = self._prev_murideo_params
+            kwargs = {
+                'ire': ire,
+                'window_size': int(case.window_size),
+            }
+            skipped = []
+            for key, value in current_params.items():
+                if prev.get(key) != value:
+                    kwargs[key] = value
+                else:
+                    skipped.append(key)
 
-            logger.info('Murideo set: HDR/SDR=%s, 窗口%d%%, IRE=%d, timing=%s, cs=%s, pat=%s',
-                        case.hdr_sdr, int(case.window_size), ire,
-                        timing, color_space, pattern_id)
+            self._murideo.set_ire_window(**kwargs)
+
+            # Update prev params
+            self._prev_murideo_params = current_params
+
+            if skipped:
+                logger.info('Murideo set: IRE=%d, 窗口%d%% (skipped unchanged: %s)',
+                            ire, int(case.window_size), ', '.join(skipped))
+            else:
+                logger.info('Murideo set: HDR/SDR=%s, 窗口%d%%, IRE=%d, timing=%s, cs=%s, pat=%s',
+                            case.hdr_sdr, int(case.window_size), ire,
+                            case.timing, case.color_space, case.pattern)
         except MurideoError as e:
             logger.error('Failed to set Murideo: %s', e)
             self._queue.put((AUTO_TEST_ERROR, f'Murideo 设置失败: {e}'))

@@ -15,7 +15,6 @@ def _detect_fonts(root: tk.Tk) -> tuple[str, str]:
     On Linux, both English and localized names may appear in font.families().
     """
     families = set(tkfont.families(root))
-    is_windows = sys.platform == 'win32'
 
     # Ordered by preference - best CJK font first
     # Windows names come in both English and Chinese forms depending on locale;

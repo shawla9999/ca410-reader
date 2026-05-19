@@ -140,6 +140,18 @@ class ControlPanel(ttk.LabelFrame):
         )
         self._autotest_stop_btn.pack(side=tk.LEFT, padx=2)
 
+        # Settle delay row
+        delay_frame = ttk.Frame(at_frame)
+        delay_frame.pack(fill=tk.X, padx=4, pady=2)
+        ttk.Label(delay_frame, text='设置后延时:').pack(side=tk.LEFT)
+        self._settle_delay_var = tk.StringVar(value='3')
+        ttk.Entry(delay_frame, textvariable=self._settle_delay_var, width=5).pack(side=tk.LEFT, padx=4)
+        ttk.Label(delay_frame, text='秒').pack(side=tk.LEFT)
+        ttk.Label(delay_frame, text='  间隔延时:').pack(side=tk.LEFT)
+        self._step_delay_var = tk.StringVar(value='2')
+        ttk.Entry(delay_frame, textvariable=self._step_delay_var, width=5).pack(side=tk.LEFT, padx=4)
+        ttk.Label(delay_frame, text='秒').pack(side=tk.LEFT)
+
         self._autotest_progress_var = tk.StringVar(value='')
         ttk.Label(at_frame, textvariable=self._autotest_progress_var,
                   font=(cjk_family(), 9)).pack(fill=tk.X, padx=4, pady=2)
@@ -210,6 +222,20 @@ class ControlPanel(ttk.LabelFrame):
             return max(0.1, val)
         except ValueError:
             return 1.0
+
+    def get_settle_delay(self) -> float:
+        try:
+            val = float(self._settle_delay_var.get())
+            return max(0, val)
+        except ValueError:
+            return 3.0
+
+    def get_step_delay(self) -> float:
+        try:
+            val = float(self._step_delay_var.get())
+            return max(0, val)
+        except ValueError:
+            return 2.0
 
     def set_test_case_fields(self, case) -> None:
         self._image_mode_var.set(case.image_mode)

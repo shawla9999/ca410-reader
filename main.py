@@ -6,8 +6,15 @@ import sys
 from app import Application
 
 
+def _app_data_dir() -> str:
+    if sys.platform == 'win32':
+        base = os.environ.get('APPDATA', os.path.expanduser('~'))
+        return os.path.join(base, 'ca410_reader')
+    return os.path.expanduser('~/.ca410_reader')
+
+
 def setup_logging() -> None:
-    log_dir = os.path.expanduser('~/.ca410_reader')
+    log_dir = _app_data_dir()
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, 'ca410_reader.log')
 

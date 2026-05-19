@@ -1,9 +1,12 @@
-"""WebSocket driver for Murideo Seven G8K pattern generator.
+"""Driver for Murideo Seven G8K pattern generator.
 
 Protocol reference: murideo-seven-g8k-protocol.md
 
-Communication uses WebSocket at ws://{device_ip}/ws/uart.
-Command format:
+Supports two transport types:
+    - WebSocket: ws://{device_ip}/ws/uart (default, preferred)
+    - Serial:    RS-232 or USB virtual COM port (same command format)
+
+Command format (identical for both transports):
     \\r\\n{FUNCTION}||{CATEGORY},{VALUE}\\r\\n
 
 Three command functions:
@@ -25,7 +28,7 @@ IRE/Window size command (discovered from Web UI, confirmed by testing):
     1. Send SENDDOUBLE||98,26 to select Window pattern
     2. Wait 700ms
     3. Send SENDOTHER||30971,{ire},{size}
-       - ire: IRE brightness level (0-100, 100=full white)
+       - ire: IRE brightness level (0-255, 255=full white)
        - size: window size percentage (0-100)
 
 Response format (confirmed by testing):
@@ -34,11 +37,11 @@ Response format (confirmed by testing):
     e.g. HDR (Cat 111)    -> RESPONSE||32879||1\\r\\n
 """
 
-import asyncio
 import logging
-import re
 
-import websockets
+import serial
+
+from driver.murideo_transport import MurideoTransport, WebSocketTransport, SerialTransport
 
 logger = logging.getLogger(__name__)
 
@@ -144,67 +147,114 @@ def _parse_response(response: str) -> dict | None:
 
 
 class MurideoDriver:
-    """Control a Murideo Seven G8K via WebSocket.
+    """Control a Murideo Seven G8K via WebSocket or Serial.
 
-    Each operation runs asyncio.run() in the calling thread,
-    so all methods are blocking and must be called from worker threads
+    All methods are blocking and must be called from worker threads
     (not the tkinter main thread).
     """
 
     DEFAULT_IP = '192.168.1.239'
     WS_PATH = '/ws/uart'
-    RECV_TIMEOUT = 5.0
+    RECV_TIMEOUT = 2.0
 
-    def __init__(self):
+    def __init__(self, transport_type: str = 'websocket'):
         self._host = ''
         self._ws_url = ''
         self._connected = False
-        self._ws = None
+        self._transport: MurideoTransport | None = None
+        self._transport_type = transport_type
+        self._serial_config: dict = {}
 
     # -- properties ----------------------------------------------------------
 
     @property
     def is_connected(self) -> bool:
+        if self._transport:
+            return self._transport.is_connected()
         return self._connected
 
     @property
     def host(self) -> str:
         return self._host
 
+    @property
+    def transport_type(self) -> str:
+        return self._transport_type
+
+    @property
+    def serial_port(self) -> str:
+        return self._serial_config.get('port', '')
+
     # -- configuration -------------------------------------------------------
 
     def configure(self, host: str) -> None:
+        """Configure WebSocket connection target."""
+        self._transport_type = 'websocket'
         self._host = host.strip()
         self._ws_url = f'ws://{self._host}{self.WS_PATH}'
+
+    def configure_serial(self, port: str, baudrate: int = 115200,
+                         bytesize=serial.EIGHTBITS,
+                         parity=serial.PARITY_NONE,
+                         stopbits=serial.STOPBITS_ONE) -> None:
+        """Configure Serial connection parameters."""
+        self._transport_type = 'serial'
+        self._serial_config = {
+            'port': port, 'baudrate': baudrate,
+            'bytesize': bytesize, 'parity': parity, 'stopbits': stopbits,
+        }
 
     # -- connection ----------------------------------------------------------
 
     def connect(self, host: str | None = None) -> None:
-        """Connect to Murideo WebSocket. Blocks until connected or error."""
-        if host:
-            self.configure(host)
-        if not self._host:
-            raise MurideoConnectionError('请输入 Murideo IP 地址')
-
-        try:
-            self._ws = asyncio.run(self._async_connect())
-            self._connected = True
-            logger.info('Connected to Murideo at %s', self._ws_url)
-        except Exception as e:
-            self._connected = False
-            self._ws = None
+        """Connect to Murideo. Blocks until connected or error."""
+        if self._transport_type == 'websocket':
+            if host:
+                self.configure(host)
+            if not self._host:
+                raise MurideoConnectionError('请输入 Murideo IP 地址')
+            self._transport = WebSocketTransport()
+            try:
+                self._transport.connect(
+                    url=self._ws_url, timeout=self.RECV_TIMEOUT,
+                )
+                self._connected = True
+                logger.info('Connected to Murideo at %s', self._ws_url)
+            except Exception as e:
+                self._connected = False
+                self._transport = None
+                raise MurideoConnectionError(
+                    f'无法连接到 Murideo ({self._ws_url}): {e}'
+                ) from e
+        elif self._transport_type == 'serial':
+            if not self._serial_config.get('port'):
+                raise MurideoConnectionError('请选择 Murideo 串口')
+            self._transport = SerialTransport()
+            try:
+                self._transport.connect(
+                    **self._serial_config, timeout=self.RECV_TIMEOUT,
+                )
+                self._connected = True
+                logger.info('Connected to Murideo serial %s',
+                            self._serial_config['port'])
+            except Exception as e:
+                self._connected = False
+                self._transport = None
+                raise MurideoConnectionError(
+                    f'无法打开 Murideo 串口: {e}'
+                ) from e
+        else:
             raise MurideoConnectionError(
-                f'无法连接到 Murideo ({self._ws_url}): {e}'
-            ) from e
+                f'未知传输类型: {self._transport_type}')
 
     def disconnect(self) -> None:
         """Disconnect from Murideo."""
-        if self._ws:
+        if self._transport:
             try:
-                asyncio.run(self._ws.close())
+                self._transport.disconnect()
             except Exception:
                 pass
-            self._ws = None
+            self._transport = None
         self._connected = False
         logger.info('Disconnected from Murideo')
 
@@ -219,7 +269,7 @@ class MurideoDriver:
                        pattern_id: int | None = None) -> None:
         """Set HDR, IRE brightness level and window size in one connection.
 
-        All commands are sent on a single WebSocket connection because
+        All commands are sent on a single transport connection because
         the IRE mode state does not persist across connections.
 
         Sequence:
@@ -279,7 +329,7 @@ class MurideoDriver:
         commands.append(f'\r\nSENDOTHER||{CAT_IRE_WINDOW},{ire},{window_size}\r\n')
         delays.append(0.7)
         try:
-            asyncio.run(self._async_send_batch(commands, delays))
+            self._transport.send_batch(commands, delays, self.RECV_TIMEOUT)
         except Exception as e:
             logger.error('Murideo IRE window error: %s', e)
             raise MurideoError(f'IRE窗口设置失败: {e}') from e
@@ -367,83 +417,18 @@ class MurideoDriver:
     # -- internal -------------------------------------------------------------
 
     def _send_and_wait(self, command: str) -> str | None:
-        """Send a command via WebSocket and wait for response.
-
-        Each call creates a fresh asyncio.run() to avoid event loop issues
-        when called from different threads.
-        """
+        """Send a command via the transport and wait for response."""
+        self._ensure_connected()
         try:
-            return asyncio.run(self._async_send_and_recv(command))
+            return self._transport.send_and_recv(command, self.RECV_TIMEOUT)
+        except ConnectionError as e:
+            self._connected = False
+            raise MurideoConnectionError(f'连接已断开: {e}') from e
         except Exception as e:
             logger.error('Murideo send error: %s', e)
             raise MurideoError(f'发送命令失败: {e}') from e
 
     def _ensure_connected(self) -> None:
-        if not self._connected:
+        if not self._transport or not self._transport.is_connected():
+            self._connected = False
             raise MurideoConnectionError('Murideo 未连接')
-
-    # -- async implementations ------------------------------------------------
-
-    async def _async_connect(self):
-        """Connect WebSocket and return the connection object."""
-        ws = await websockets.connect(
-            self._ws_url,
-            open_timeout=self.RECV_TIMEOUT,
-            close_timeout=2.0,
-        )
-        return ws
-
-    async def _async_send_and_recv(self, command: str) -> str | None:
-        """Send command on existing WebSocket and read response.
-
-        Since asyncio.run() creates a new loop each time, we need to
-        reconnect for each command batch. This is simpler and avoids
-        event loop threading issues.
-        """
-        async with websockets.connect(
-            self._ws_url,
-            open_timeout=self.RECV_TIMEOUT,
-            close_timeout=2.0,
-        ) as ws:
-            await ws.send(command)
-            logger.debug('WS Sent: %s', repr(command))
-            try:
-                response = await asyncio.wait_for(
-                    ws.recv(), timeout=self.RECV_TIMEOUT
-                )
-                logger.debug('WS Received: %s', repr(response))
-                return response
-            except asyncio.TimeoutError:
-                logger.debug('WS: no response (timeout)')
-                return None
-
-    async def _async_send_batch(self, commands: list[str],
-                                 delays: list[float] | None = None) -> list[str | None]:
-        """Send multiple commands on a single WebSocket connection.
-
-        Args:
-            commands: List of command strings to send sequentially.
-            delays: Optional list of delays in seconds before each command.
-                    delays[0] is the delay before commands[0].
-        """
-        responses = []
-        async with websockets.connect(
-            self._ws_url,
-            open_timeout=self.RECV_TIMEOUT,
-            close_timeout=2.0,
-        ) as ws:
-            for i, cmd in enumerate(commands):
-                if delays and i < len(delays) and delays[i] > 0:
-                    await asyncio.sleep(delays[i])
-                await ws.send(cmd)
-                logger.debug('WS Sent: %s', repr(cmd))
-                try:
-                    resp = await asyncio.wait_for(
-                        ws.recv(), timeout=self.RECV_TIMEOUT
-                    )
-                    logger.debug('WS Received: %s', repr(resp))
-                    responses.append(resp)
-                except asyncio.TimeoutError:
-                    logger.debug('WS: no response (timeout)')
-                    responses.append(None)
-        return responses

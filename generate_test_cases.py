@@ -74,9 +74,12 @@ ws.row_dimensions[2].height = 45
 
 # ----- Generate full cross test cases -----
 IMAGE_MODES = ["鲜艳", "标准", "影院"]
-WINDOW_SIZES = [10, 50, 100]
 PEAK_LEVELS = ["关", "弱", "中", "强"]
-BRIGHTNESSES = [100, 200, 600]
+
+# Window sizes: 1%-30% at 1% intervals, >30% at 5% intervals up to 100%
+WINDOW_SIZES = list(range(1, 31)) + list(range(35, 101, 5))  # 44 values
+
+HDR_BRIGHTNESSES = [100, 200, 600, 900]
 
 test_cases = []
 idx = 0
@@ -92,16 +95,18 @@ def _hdr_note(mode, win, peak, bright):
         parts.append("验证低亮度片源下boost是否生效")
     elif bright == 200:
         parts.append("验证中低亮度片源下boost表现")
-    else:
+    elif bright == 600:
         parts.append("正常亮度片源下的boost表现")
+    else:
+        parts.append("高亮度片源下的boost表现")
     return "；".join(parts)
 
 
-def _sdr_note(mode, win, peak, bright):
+def _sdr_note(mode, win, peak):
     """Generate purpose note for SDR cases."""
     if peak == "关":
         return f"{mode}模式SDR信号{win}%窗口boost关闭基线"
-    return f"测试{mode}模式SDR信号下boost{peak}是否生效，与HDR同条件对比"
+    return f"测试{mode}模式SDR信号{win}%窗口下boost{peak}是否生效"
 
 
 def _ld_note(mode, win, ld):
@@ -109,11 +114,11 @@ def _ld_note(mode, win, ld):
     return f"测试{mode}模式{win}%窗口boost强+LD{ld}的亮度输出，与LD关对比分析LD对boost的影响"
 
 
-# HDR cases: 3 modes × 3 windows × 4 peaks × 3 brightnesses = 108
+# HDR cases: 3 modes × 44 windows × 4 peaks × 4 brightnesses = 2112
 for mode in IMAGE_MODES:
     for win in WINDOW_SIZES:
         for peak in PEAK_LEVELS:
-            for bright in BRIGHTNESSES:
+            for bright in HDR_BRIGHTNESSES:
                 idx += 1
                 test_cases.append({
                     "编号": f"T{idx:03d}",
@@ -127,26 +132,22 @@ for mode in IMAGE_MODES:
                     "note": _hdr_note(mode, win, peak, bright),
                 })
 
-# SDR cases: 3 modes × 2 windows × 4 peaks × 1 brightness = 24
-SDR_WINDOW_SIZES = [10, 50]
-SDR_BRIGHTNESSES = [100]
-
+# SDR cases: 3 modes × 44 windows × 4 peaks = 528 (SDR无亮度变化)
 for mode in IMAGE_MODES:
-    for win in SDR_WINDOW_SIZES:
+    for win in WINDOW_SIZES:
         for peak in PEAK_LEVELS:
-            for bright in SDR_BRIGHTNESSES:
-                idx += 1
-                test_cases.append({
-                    "编号": f"T{idx:03d}",
-                    "图像模式": mode,
-                    "峰值亮度": peak,
-                    "当前背光值": 100,
-                    "Local Dimming": "关",
-                    "窗口大小": f"{win}%",
-                    "hdr_sdr": "SDR",
-                    "白块亮度": bright,
-                    "note": _sdr_note(mode, win, peak, bright),
-                })
+            idx += 1
+            test_cases.append({
+                "编号": f"T{idx:03d}",
+                "图像模式": mode,
+                "峰值亮度": peak,
+                "当前背光值": 100,
+                "Local Dimming": "关",
+                "窗口大小": f"{win}%",
+                "hdr_sdr": "SDR",
+                "白块亮度": "",
+                "note": _sdr_note(mode, win, peak),
+            })
 
 # LD × boost强 interaction: 3 modes × 2 windows × peak=强 × LD=弱/中/强 = 18
 # LD=关+peak=强 already covered in HDR group, so only add 弱/中/强
@@ -210,14 +211,14 @@ ws2 = wb.create_sheet("测试计划")
 plan_items = [
     ("测试目标", "探究图像模式、小窗口大小、峰值亮度、白块亮度、HDR/SDR对Boost峰值亮度的影响规律"),
     ("核心问题1", "不同图像模式(鲜艳/标准/影院)下，各峰值亮度档位的boost提升量是否有差异？"),
-    ("核心问题2", "不同白块亮度(100/200/600nit)下boost行为是否不同？低亮度下boost是否失效？"),
+    ("核心问题2", "不同白块亮度(100/200/600/900nit)下boost行为是否不同？低亮度下boost是否失效？"),
     ("核心问题3", "HDR vs SDR下boost行为是否不同？低亮度SDR下boost是否同样失效？"),
     ("信号源", "MURIDEO 8K SEVEN GENERATOR"),
     ("测量设备", "CA-410 色彩分析仪"),
-    ("HDR测试", "图像模式: 鲜艳/标准/影院, 窗口: 10%/50%/100%, 峰值亮度: 关/弱/中/强, 白块: 100/200/600nit\n3×3×4×3 = 108组"),
-    ("SDR测试", "图像模式: 鲜艳/标准/影院, 窗口: 10%/50%, 峰值亮度: 关/弱/中/强, 白块: 100nit\n3×2×4×1 = 24组"),
+    ("HDR测试", "图像模式: 鲜艳/标准/影院, 窗口: 1%-30%(1%间隔)+35%-100%(5%间隔), 峰值亮度: 关/弱/中/强, 白块: 100/200/600/900nit\n3×44×4×4 = 2112组"),
+    ("SDR测试", "图像模式: 鲜艳/标准/影院, 窗口: 1%-30%(1%间隔)+35%-100%(5%间隔), 峰值亮度: 关/弱/中/强\n3×44×4 = 528组"),
     ("LD×Boost测试", "图像模式: 鲜艳/标准/影院, 窗口: 10%/50%, 峰值亮度=强, LD: 弱/中/强, 白块: 100nit, HDR\n3×2×3 = 18组 (LD=关已含在HDR组中)"),
-    ("总计", "108 + 24 + 18 = 150组"),
+    ("总计", "2112 + 528 + 18 = 2658组"),
     ("固定条件", "当前背光值=100; HDR/SDR组: LD=关; LD×Boost组: 峰值亮度=强, 白块亮度=100nit, HDR"),
     ("每组测量次数", "1次"),
     ("操作要点1", "HDR时MURIDEO输出HDR10/PQ EOTF/BT.2020格式"),
@@ -255,9 +256,9 @@ ref_data = [
     ("B: 峰值亮度", "关、弱、中、强", "有序离散", "Boost峰值亮度档位", "电视端"),
     ("C: 当前背光值", "100 (固定)", "连续", "背光PWM/亮度设置值，本次测试固定为100", "电视端"),
     ("D: Local Dimming", "关、弱、中、强", "有序离散", "HDR/SDR组固定为关；LD×Boost组测试弱/中/强与boost强的关系", "电视端"),
-    ("E: 小窗口大小", "HDR: 10%/50%/100%, SDR: 10%/50%", "连续", "信号源输出测试图案窗口大小", "MURIDEO"),
+    ("E: 小窗口大小", "1%-30%(1%间隔)+35%-100%(5%间隔)=44级", "连续", "信号源输出测试图案窗口大小", "MURIDEO"),
     ("F: HDR/SDR", "HDR、SDR", "离散", "HDR: HDR10/PQ/BT.2020; SDR: BT.709/Gamma 2.2", "MURIDEO"),
-    ("G: 白块亮度", "HDR: 100/200/600nit, SDR: 100nit", "连续", "信号源输出白块亮度，100nit=极低亮度片源", "MURIDEO"),
+    ("G: 白块亮度", "HDR: 100/200/600/900nit, SDR: 无", "连续", "信号源输出白块亮度，100nit=极低亮度片源，900nit=高亮度片源", "MURIDEO"),
 ]
 for r, (factor, levels, ftype, desc, source) in enumerate(ref_data, 2):
     for c_idx, val in enumerate([factor, levels, ftype, desc, source], 1):
@@ -279,36 +280,34 @@ for i, h in enumerate(setup_headers, 1):
     c.alignment = center
     c.border = thin_border
 
-# Group by image mode + window size + hdr_sdr
+# Group by image mode + hdr_sdr (summarize all window sizes under each mode)
 setup_data = []
 
-# HDR groups
+# HDR groups - one entry per image mode, covering all windows
 for mode in IMAGE_MODES:
-    for win in WINDOW_SIZES:
-        start_idx = None
-        end_idx = None
-        for i, tc in enumerate(test_cases):
-            if tc["图像模式"] == mode and tc["窗口大小"] == f"{win}%" and tc["hdr_sdr"] == "HDR":
-                num = int(tc["编号"][1:])
-                if start_idx is None:
-                    start_idx = num
-                end_idx = num
-        setup_data.append((f"T{start_idx:03d}-T{end_idx:03d}", f"{win}%", "HDR", "100/200/600", f"{mode}模式"))
+    start_idx = None
+    end_idx = None
+    for i, tc in enumerate(test_cases):
+        if tc["图像模式"] == mode and tc["hdr_sdr"] == "HDR":
+            num = int(tc["编号"][1:])
+            if start_idx is None:
+                start_idx = num
+            end_idx = num
+    setup_data.append((f"T{start_idx:03d}-T{end_idx:03d}", "1%-100%(44级)", "HDR", "100/200/600/900", f"{mode}模式"))
 
 setup_data.append(("", "", "", "", ""))
 
-# SDR groups
+# SDR groups - one entry per image mode, covering all windows
 for mode in IMAGE_MODES:
-    for win in SDR_WINDOW_SIZES:
-        start_idx = None
-        end_idx = None
-        for i, tc in enumerate(test_cases):
-            if tc["图像模式"] == mode and tc["窗口大小"] == f"{win}%" and tc["hdr_sdr"] == "SDR":
-                num = int(tc["编号"][1:])
-                if start_idx is None:
-                    start_idx = num
-                end_idx = num
-        setup_data.append((f"T{start_idx:03d}-T{end_idx:03d}", f"{win}%", "SDR", "100", f"{mode}模式"))
+    start_idx = None
+    end_idx = None
+    for i, tc in enumerate(test_cases):
+        if tc["图像模式"] == mode and tc["hdr_sdr"] == "SDR":
+            num = int(tc["编号"][1:])
+            if start_idx is None:
+                start_idx = num
+            end_idx = num
+    setup_data.append((f"T{start_idx:03d}-T{end_idx:03d}", "1%-100%(44级)", "SDR", "-", f"{mode}模式"))
 
 setup_data.append(("", "", "", "", ""))
 

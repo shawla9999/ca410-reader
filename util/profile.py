@@ -17,6 +17,7 @@ from driver.murideo_driver import (
     CAT_TIMING, CAT_COLOR_SPACE, CAT_COLOR_DEPTH, CAT_HDR, CAT_BT2020,
     PATTERN_WINDOW, HDR_OFF,
 )
+from util.resolver import resource_path
 
 # Defaults matching current auto-test behavior
 _DEFAULTS = {
@@ -123,8 +124,10 @@ def save_profile(profile: TestProfile, filepath: str | Path) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def list_profiles(directory: str | Path = 'profiles') -> list[Path]:
+def list_profiles(directory: str | Path = None) -> list[Path]:
     """List all JSON profile files in a directory."""
+    if directory is None:
+        directory = resource_path('profiles')
     d = Path(directory)
     if not d.exists():
         return []

@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
 
+import serial.tools.list_ports
+
 from driver.ca410_types import HDR_SDR_MODES
 from driver.murideo_driver import (
     HDR_OFF, HDR_HDR10, HDR_HLG,
@@ -12,6 +14,9 @@ from util.profile import load_profile, list_profiles
 class MurideoPanel(ttk.LabelFrame):
     """Murideo device control panel: connection, HDR, window, IRE, timing, color space, pattern."""
 
+    TRANSPORT_OPTIONS = ['WebSocket', 'Serial']
+    BAUDRATE_OPTIONS = ['9600', '19200', '38400', '57600', '115200', '230400', '460800']
+
     def __init__(self, parent, **kwargs):
         super().__init__(parent, text='Murideo 控制', **kwargs)
         self._murideo_connected = False
@@ -19,18 +24,64 @@ class MurideoPanel(ttk.LabelFrame):
         self._create_widgets()
 
     def _create_widgets(self):
-        # -- Connection --
-        conn_frame = ttk.Frame(self)
-        conn_frame.pack(fill=tk.X, padx=4, pady=2)
-        ttk.Label(conn_frame, text='IP:').pack(side=tk.LEFT)
-        self._murideo_ip_var = tk.StringVar(value='192.168.1.239')
-        ttk.Entry(conn_frame, textvariable=self._murideo_ip_var, width=14).pack(side=tk.LEFT, padx=4)
-        self._murideo_connect_btn = ttk.Button(
-            conn_frame, text='连接', command=self._on_murideo_connect, width=6
+        # -- Transport type selector --
+        transport_frame = ttk.Frame(self)
+        transport_frame.pack(fill=tk.X, padx=4, pady=2)
+        ttk.Label(transport_frame, text='连接方式:').pack(side=tk.LEFT)
+        self._transport_var = tk.StringVar(value=self.TRANSPORT_OPTIONS[0])
+        self._transport_combo = ttk.Combobox(
+            transport_frame, textvariable=self._transport_var,
+            values=self.TRANSPORT_OPTIONS, width=10, state='readonly',
         )
-        self._murideo_connect_btn.pack(side=tk.LEFT, padx=2)
-        self._murideo_status_label = ttk.Label(conn_frame, text='未连接', foreground='gray')
-        self._murideo_status_label.pack(side=tk.LEFT, padx=4)
+        self._transport_combo.pack(side=tk.LEFT, padx=4)
+        self._transport_combo.bind('<<ComboboxSelected>>', self._on_transport_change)
+
+        # -- WebSocket connection frame --
+        self._ws_frame = ttk.Frame(self)
+        self._ws_frame.pack(fill=tk.X, padx=4, pady=2)
+        ttk.Label(self._ws_frame, text='IP:').pack(side=tk.LEFT)
+        self._murideo_ip_var = tk.StringVar(value='192.168.1.239')
+        ttk.Entry(self._ws_frame, textvariable=self._murideo_ip_var, width=14).pack(side=tk.LEFT, padx=4)
+        self._ws_connect_btn = ttk.Button(
+            self._ws_frame, text='连接', command=self._on_murideo_connect, width=6,
+        )
+        self._ws_connect_btn.pack(side=tk.LEFT, padx=2)
+        self._ws_status_label = ttk.Label(self._ws_frame, text='未连接', foreground='gray')
+        self._ws_status_label.pack(side=tk.LEFT, padx=4)
+
+        # -- Serial connection frame (hidden by default) --
+        self._serial_frame = ttk.Frame(self)
+        # Port row
+        serial_port_frame = ttk.Frame(self._serial_frame)
+        serial_port_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(serial_port_frame, text='端口:').pack(side=tk.LEFT)
+        self._serial_port_var = tk.StringVar()
+        self._serial_port_combo = ttk.Combobox(
+            serial_port_frame, textvariable=self._serial_port_var,
+            width=22, state='readonly',
+        )
+        self._serial_port_combo.pack(side=tk.LEFT, padx=4)
+        ttk.Button(
+            serial_port_frame, text='刷新', command=self._refresh_serial_ports, width=4,
+        ).pack(side=tk.LEFT, padx=2)
+        # Baudrate row
+        serial_baud_frame = ttk.Frame(self._serial_frame)
+        serial_baud_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(serial_baud_frame, text='波特率:').pack(side=tk.LEFT)
+        self._baudrate_var = tk.StringVar(value='115200')
+        ttk.Combobox(
+            serial_baud_frame, textvariable=self._baudrate_var,
+            values=self.BAUDRATE_OPTIONS, width=8,
+        ).pack(side=tk.LEFT, padx=4)
+        # Connect row
+        serial_conn_frame = ttk.Frame(self._serial_frame)
+        serial_conn_frame.pack(fill=tk.X, pady=1)
+        self._serial_connect_btn = ttk.Button(
+            serial_conn_frame, text='连接', command=self._on_murideo_connect, width=6,
+        )
+        self._serial_connect_btn.pack(side=tk.LEFT, padx=2)
+        self._serial_status_label = ttk.Label(serial_conn_frame, text='未连接', foreground='gray')
+        self._serial_status_label.pack(side=tk.LEFT, padx=4)
 
         # -- Set button --
         set_frame = ttk.Frame(self)
@@ -120,22 +171,70 @@ class MurideoPanel(ttk.LabelFrame):
         )
         self._pattern_combo.pack(side=tk.LEFT, padx=4)
 
-    # -- state methods --
+        # -- Color depth --
+        cd_frame = ttk.Frame(self)
+        cd_frame.pack(fill=tk.X, padx=4, pady=1)
+        ttk.Label(cd_frame, text='色深:').pack(side=tk.LEFT)
+        self._color_depth_var = tk.StringVar(value='1=10bit')
+        self._color_depth_combo = ttk.Combobox(
+            cd_frame, textvariable=self._color_depth_var, width=10, state='readonly',
+            values=['0=8bit', '1=10bit', '2=12bit', '3=16bit'],
+        )
+        self._color_depth_combo.pack(side=tk.LEFT, padx=4)
+
+    # -- transport switching -------------------------------------------------
+
+    def _on_transport_change(self, event=None) -> None:
+        if self._murideo_connected:
+            return
+        transport = self._transport_var.get()
+        if transport == 'WebSocket':
+            self._serial_frame.pack_forget()
+            self._ws_frame.pack(fill=tk.X, padx=4, pady=2)
+        else:
+            self._ws_frame.pack_forget()
+            self._serial_frame.pack(fill=tk.X, padx=4, pady=2)
+            self._refresh_serial_ports()
+
+    def _refresh_serial_ports(self) -> None:
+        ports = sorted(serial.tools.list_ports.comports(), key=lambda p: p.device)
+        values = [f'{p.device} - {p.description}' for p in ports]
+        self._serial_port_combo['values'] = values
+        if values:
+            self._serial_port_combo.current(0)
+
+    # -- state methods -------------------------------------------------------
 
     def set_murideo_connected(self, connected: bool) -> None:
         self._murideo_connected = connected
-        self._murideo_status_label.config(
-            text='已连接' if connected else '未连接',
-            foreground='#00CC00' if connected else 'gray',
-        )
-        self._murideo_connect_btn.config(
-            text='断开' if connected else '连接'
-        )
+        status_text = '已连接' if connected else '未连接'
+        status_color = '#00CC00' if connected else 'gray'
+        btn_text = '断开' if connected else '连接'
+        self._ws_status_label.config(text=status_text, foreground=status_color)
+        self._serial_status_label.config(text=status_text, foreground=status_color)
+        self._ws_connect_btn.config(text=btn_text)
+        self._serial_connect_btn.config(text=btn_text)
 
-    # -- getters --
+    # -- getters -------------------------------------------------------------
+
+    def get_murideo_transport(self) -> str:
+        val = self._transport_var.get()
+        return 'websocket' if val == 'WebSocket' else 'serial'
 
     def get_murideo_host(self) -> str:
         return self._murideo_ip_var.get().strip()
+
+    def get_murideo_serial_port(self) -> str:
+        text = self._serial_port_var.get()
+        if ' - ' in text:
+            return text.split(' - ')[0]
+        return text.strip()
+
+    def get_murideo_serial_baudrate(self) -> int:
+        try:
+            return int(self._baudrate_var.get())
+        except ValueError:
+            return 115200
 
     def set_murideo_host(self, host: str) -> None:
         self._murideo_ip_var.set(host)
@@ -175,8 +274,36 @@ class MurideoPanel(ttk.LabelFrame):
         except (ValueError, IndexError):
             return None
 
+    def get_color_depth(self) -> int | None:
+        try:
+            return int(self._color_depth_var.get().split('=')[0])
+        except (ValueError, IndexError):
+            return None
+
     def is_murideo_auto_set(self) -> bool:
         return self._murideo_auto_set_var.get()
+
+    # -- setters for external control ----------------------------------------
+
+    def set_murideo_transport(self, transport: str) -> None:
+        if transport == 'serial':
+            self._transport_var.set('Serial')
+            self._ws_frame.pack_forget()
+            self._serial_frame.pack(fill=tk.X, padx=4, pady=2)
+        else:
+            self._transport_var.set('WebSocket')
+            self._serial_frame.pack_forget()
+            self._ws_frame.pack(fill=tk.X, padx=4, pady=2)
+
+    def set_murideo_serial_port(self, port: str) -> None:
+        for item in self._serial_port_combo['values']:
+            if item.startswith(port):
+                self._serial_port_var.set(item)
+                return
+        self._serial_port_var.set(port)
+
+    def set_murideo_serial_baudrate(self, baudrate: int) -> None:
+        self._baudrate_var.set(str(baudrate))
 
     def set_window_ratio_value(self, value: float) -> None:
         self._window_ratio_var.set(f'{value:.0f}')
@@ -205,7 +332,14 @@ class MurideoPanel(ttk.LabelFrame):
                 return
         self._pattern_var.set(str(pat_id))
 
-    # -- callbacks --
+    def set_color_depth_value(self, depth_id: int) -> None:
+        for item in self._color_depth_combo['values']:
+            if item.startswith(f'{depth_id}='):
+                self._color_depth_var.set(item)
+                return
+        self._color_depth_var.set(str(depth_id))
+
+    # -- callbacks -----------------------------------------------------------
 
     _murideo_connect_callback = None
     _murideo_disconnect_callback = None
@@ -220,7 +354,7 @@ class MurideoPanel(ttk.LabelFrame):
     def set_murideo_set_callback(self, callback) -> None:
         self._murideo_set_callback = callback
 
-    # -- internal --
+    # -- internal ------------------------------------------------------------
 
     def _on_murideo_connect(self) -> None:
         if self._murideo_connected:

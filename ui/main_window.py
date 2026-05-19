@@ -11,10 +11,10 @@ from driver.ca410_types import ConnectionStatus, MeasurementMode, MODE_LABELS, X
 from driver.murideo_driver import (
     MurideoDriver, MurideoError, MurideoConnectionError,
     CAT_HDR, CAT_PATTERN, PATTERN_WINDOW,
-    HDR_OFF, HDR_HDR10,
+    HDR_OFF, HDR_HDR10, HDR_HLG,
 )
 from worker import measurement_worker as mw
-from worker.auto_test_worker import AutoTestWorker, AUTO_TEST_STARTED, AUTO_TEST_PROGRESS, AUTO_TEST_CASE_DONE, AUTO_TEST_ALL_DONE, AUTO_TEST_ERROR, AUTO_TEST_STOPPED, profile_to_test_cases
+from worker.auto_test_worker import AutoTestWorker, AUTO_TEST_STARTED, AUTO_TEST_PROGRESS, AUTO_TEST_CASE_DONE, AUTO_TEST_ALL_DONE, AUTO_TEST_ERROR, AUTO_TEST_STOPPED, AUTO_TEST_TV_CONFIRM, profile_to_test_cases
 from ui.connection_panel import ConnectionPanel
 from ui.measurement_panel import MeasurementPanel
 from ui.murideo_panel import MurideoPanel
@@ -113,6 +113,13 @@ class MainWindow:
             self._root.geometry(self._config.window_geometry)
         if self._config.murideo_host:
             self._murideo_panel.set_murideo_host(self._config.murideo_host)
+        if self._config.murideo_transport:
+            self._murideo_panel.set_murideo_transport(self._config.murideo_transport)
+        if self._config.murideo_serial_port:
+            self._murideo_panel.set_murideo_serial_port(self._config.murideo_serial_port)
+        if self._config.murideo_serial_baudrate:
+            self._murideo_panel.set_murideo_serial_baudrate(
+                self._config.murideo_serial_baudrate)
 
     def _poll_queue(self):
         while True:
@@ -266,6 +273,9 @@ class MainWindow:
         elif msg_type == AUTO_TEST_ERROR:
             self._ctrl_panel.show_error(str(data))
 
+        elif msg_type == AUTO_TEST_TV_CONFIRM:
+            self._on_autotest_tv_confirm(data)
+
     def _update_connection_status(self, status: ConnectionStatus) -> None:
         self._connection_status = status
         self._conn_panel.update_status(status)
@@ -274,8 +284,12 @@ class MainWindow:
     # -- Murideo operations ---------------------------------------------------
 
     def _on_murideo_connect(self) -> None:
+        transport = self._murideo_panel.get_murideo_transport()
         host = self._murideo_panel.get_murideo_host()
-        t = threading.Thread(target=self._run_murideo_connect, args=(host,), daemon=True)
+        t = threading.Thread(
+            target=self._run_murideo_connect,
+            args=(transport, host), daemon=True,
+        )
         t.start()
 
     def _on_murideo_disconnect(self) -> None:
@@ -303,6 +317,7 @@ class MainWindow:
             brightness = case.window_brightness
             timing = case.timing
             color_space = case.color_space
+            color_depth = case.color_depth
             pattern = case.pattern
         else:
             window_size = self._murideo_panel.get_window_ratio()
@@ -310,6 +325,7 @@ class MainWindow:
             brightness = self._murideo_panel.get_window_brightness()
             timing = self._murideo_panel.get_timing()
             color_space = self._murideo_panel.get_color_space()
+            color_depth = self._murideo_panel.get_color_depth()
             pattern = self._murideo_panel.get_pattern()
             logger.info('Manual Murideo set: ws=%s, hdr=%s, ire=%s, timing=%s, cs=%s, pat=%s',
                         window_size, hdr_sdr, brightness, timing, color_space, pattern)
@@ -325,7 +341,7 @@ class MainWindow:
                 return
         t = threading.Thread(
             target=self._run_murideo_set,
-            args=(hdr_sdr, window_size, brightness, timing, color_space, pattern),
+            args=(hdr_sdr, window_size, brightness, timing, color_space, color_depth, pattern),
             daemon=True,
         )
         t.start()
@@ -334,21 +350,33 @@ class MainWindow:
         if self._auto_testing and self._auto_test.current_case:
             return self._auto_test.current_case
         if not self._manual_cases:
-            filepath = self._ctrl_panel.get_excel_path()
-            if filepath:
-                try:
-                    self._manual_cases = load_test_cases(filepath)
-                    self._manual_case_index = 0
-                except Exception:
-                    return None
+            # Try profile first, then Excel
+            if self._loaded_profile and self._loaded_profile.steps:
+                self._manual_cases = profile_to_test_cases(self._loaded_profile)
+                self._manual_case_index = 0
+            else:
+                filepath = self._ctrl_panel.get_excel_path()
+                if filepath:
+                    try:
+                        self._manual_cases = load_test_cases(filepath)
+                        self._manual_case_index = 0
+                    except Exception:
+                        return None
         if self._manual_cases and self._manual_case_index < len(self._manual_cases):
             return self._manual_cases[self._manual_case_index]
         return None
 
-    def _run_murideo_connect(self, host: str) -> None:
+    def _run_murideo_connect(self, transport: str, host: str | None) -> None:
         try:
-            self._murideo.connect(host)
-            self._queue.put((MURIDEO_CONNECTED, host))
+            if transport == 'serial':
+                port = self._murideo_panel.get_murideo_serial_port()
+                baudrate = self._murideo_panel.get_murideo_serial_baudrate()
+                self._murideo.configure_serial(port, baudrate)
+                self._murideo.connect()
+                self._queue.put((MURIDEO_CONNECTED, port))
+            else:
+                self._murideo.connect(host)
+                self._queue.put((MURIDEO_CONNECTED, host))
         except MurideoError as e:
             self._queue.put((MURIDEO_ERROR, str(e)))
         except Exception as e:
@@ -358,19 +386,25 @@ class MainWindow:
                          brightness: float | None,
                          timing: int | None = None,
                          color_space: int | None = None,
+                         color_depth: int | None = None,
                          pattern_id: int | None = None) -> None:
         try:
             parts = []
-            hdr_map = {'HDR': HDR_HDR10, 'SDR': HDR_OFF}
-            hdr_mode = hdr_map.get(hdr_sdr)
+            hdr_map = {'HDR': HDR_HDR10, 'SDR': HDR_OFF, 'HLG': HDR_HLG}
+            hdr_mode = hdr_map.get(hdr_sdr, HDR_OFF)
+            bt2020 = 1 if hdr_sdr == 'HDR' else 0
             ire = int(brightness) if brightness is not None else 255
+            logger.info('Murideo set: hdr_sdr=%s hdr_mode=%s bt2020=%d ire=%d ws=%s '
+                        'timing=%s cs=%s cd=%s pat=%s',
+                        hdr_sdr, hdr_mode, bt2020, ire, window_size,
+                        timing, color_space, color_depth, pattern_id)
             if window_size is not None:
                 try:
                     self._murideo.set_ire_window(
                         ire=ire, window_size=int(window_size),
-                        hdr_mode=hdr_mode,
+                        hdr_mode=hdr_mode, bt2020=bt2020,
                         timing=timing, color_space=color_space,
-                        pattern_id=pattern_id,
+                        color_depth=color_depth, pattern_id=pattern_id,
                     )
                     if hdr_mode is not None:
                         parts.append(f'HDR={hdr_sdr}')
@@ -415,22 +449,24 @@ class MainWindow:
                 self._manual_case_index += 1
         hdr_map = {'HDR': HDR_HDR10, 'SDR': HDR_OFF}
         hdr_mode = hdr_map.get(hdr_sdr)
+        bt2020 = 1 if hdr_sdr == 'HDR' else 0
         window_size = self._murideo_panel.get_window_ratio()
         brightness = self._murideo_panel.get_window_brightness()
         t = threading.Thread(
             target=self._run_murideo_auto_set,
-            args=(hdr_mode, window_size, brightness),
+            args=(hdr_mode, bt2020, window_size, brightness),
             daemon=True,
         )
         t.start()
 
     def _run_murideo_auto_set(self, hdr_mode: int | None,
+                              bt2020: int | None = None,
                               window_size: float | None = None,
                               brightness: float | None = None) -> None:
         try:
             ire = int(brightness) if brightness is not None else 255
             if window_size is not None:
-                self._murideo.set_ire_window(ire, int(window_size), hdr_mode=hdr_mode)
+                self._murideo.set_ire_window(ire, int(window_size), hdr_mode=hdr_mode, bt2020=bt2020)
             else:
                 if hdr_mode is not None:
                     self._murideo.set_hdr(hdr_mode)
@@ -450,9 +486,13 @@ class MainWindow:
             self._murideo_panel.set_color_space_value(defaults['color_space'])
         if 'pattern' in defaults:
             self._murideo_panel.set_pattern_value(defaults['pattern'])
+        if 'color_depth' in defaults:
+            self._murideo_panel.set_color_depth_value(defaults['color_depth'])
         self._ctrl_panel.show_error(f'已加载方案: {profile.name} ({len(profile.steps)} 步)')
 
     def _on_autotest_start(self) -> None:
+        self._auto_test.set_settle_delay(self._ctrl_panel.get_settle_delay())
+        self._auto_test.set_step_delay(self._ctrl_panel.get_step_delay())
         if self._loaded_profile and self._loaded_profile.steps:
             cases = profile_to_test_cases(self._loaded_profile)
             self._auto_test.configure(cases, '', profile=self._loaded_profile)
@@ -498,6 +538,29 @@ class MainWindow:
     def _on_autotest_measure(self) -> None:
         self._worker.measure_single(mode=self._ctrl_panel.get_mode())
 
+    def _on_autotest_tv_confirm(self, data: dict) -> None:
+        """TV parameters changed — show confirmation dialog."""
+        case = data.get('case')
+        index = data.get('index', 0)
+        if case:
+            self._ctrl_panel.set_test_case_fields(case)
+            self._murideo_panel.set_window_ratio_value(case.window_size)
+            self._murideo_panel.set_window_brightness_value(case.window_brightness)
+        lines = [
+            f'第 {index + 1} 步 TV 参数已变化，请调整电视机设置：',
+            '',
+            f'  图像模式: {case.image_mode}',
+            f'  峰值亮度: {case.peak_brightness}',
+            f'  背光值: {case.backlight_value:.0f}',
+            f'  Local Dimming: {case.local_dimming}',
+        ]
+        if messagebox.askokcancel('TV 参数确认', '\n'.join(lines)):
+            self._auto_test.confirm_tv_params()
+        else:
+            self._auto_test.stop()
+            self._auto_testing = False
+            self._ctrl_panel.set_autotest_state(running=False)
+
     # -- window close ----------------------------------------------------------
 
     def _on_close(self):
@@ -514,6 +577,9 @@ class MainWindow:
         )
         self._config.continuous_interval = self._ctrl_panel.get_interval()
         self._config.murideo_host = self._murideo_panel.get_murideo_host()
+        self._config.murideo_transport = self._murideo_panel.get_murideo_transport()
+        self._config.murideo_serial_port = self._murideo_panel.get_murideo_serial_port()
+        self._config.murideo_serial_baudrate = self._murideo_panel.get_murideo_serial_baudrate()
         try:
             self._config.window_geometry = self._root.geometry()
         except Exception:

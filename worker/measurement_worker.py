@@ -93,7 +93,8 @@ class MeasurementWorker:
                 try:
                     self._driver.set_mode(mode)
                 except CA410Error as e:
-                    logger.warning('set_mode failed: %s, continuing with current mode', e)
+                    self._result_queue.put((RESULT_ERROR, f'设置模式失败: {e}'))
+                    return
             result = self._driver.measure()
             logger.info('Single measure result: lv=%.2f', result.lv)
             self._result_queue.put((RESULT_SINGLE, result))
