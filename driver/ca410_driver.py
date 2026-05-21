@@ -71,8 +71,19 @@ class CA410Driver:
             resp = self._read_response()
             self._check_ok(resp)
             self._in_remote_mode = True
+
+            # Explicitly set measurement mode after entering remote mode.
+            # The device does NOT default to any specific mode after COM,1 —
+            # if MDS is not sent, MES returns ER10 (undefined command).
+            import time
+            time.sleep(0.1)
+            self._send_command('MDS,0')
+            resp = self._read_response()
+            self._check_ok(resp)
             self._current_mode = MeasurementMode.XY_LV
-            logger.info('Entered remote mode')
+            time.sleep(0.1)
+
+            logger.info('Entered remote mode, set xyLv')
         except CA410Error:
             self._serial.close()
             self._serial = None
