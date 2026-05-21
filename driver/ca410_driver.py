@@ -1,10 +1,11 @@
 import logging
+import time
 
 import serial
 import serial.tools.list_ports
 
 from .ca410_types import MeasurementMode, TduvLvResult, XyLvResult
-from .errors import CA410Error, ConnectionError, TimeoutError, parse_error_response
+from .errors import CA410Error, ConnectionError, TimeoutError, UndefinedCommandError, parse_error_response
 
 logger = logging.getLogger(__name__)
 
@@ -72,18 +73,29 @@ class CA410Driver:
             self._check_ok(resp)
             self._in_remote_mode = True
 
-            # Explicitly set measurement mode after entering remote mode.
-            # The device does NOT default to any specific mode after COM,1 —
-            # if MDS is not sent, MES returns ER10 (undefined command).
-            import time
+            # The device needs time to fully enter remote mode before
+            # accepting further commands.  100 ms is too short on some
+            # firmware revisions — the official tool waits noticeably
+            # longer before sending the next command.
+            time.sleep(0.5)
+
+            # Select probe 1.  Without PSC the device may not accept MES
+            # on fresh power-on — the official tool always sends PSC.
+            self._send_command('PSC,1')
+            resp = self._read_response()
+            self._check_ok(resp)
             time.sleep(0.1)
+
+            # Set measurement display mode.  The device does NOT default
+            # to any specific mode after COM,1 — if MDS is not sent, MES
+            # returns ER10 (undefined command).
             self._send_command('MDS,0')
             resp = self._read_response()
             self._check_ok(resp)
             self._current_mode = MeasurementMode.XY_LV
-            time.sleep(0.1)
+            time.sleep(0.2)
 
-            logger.info('Entered remote mode, set xyLv')
+            logger.info('Entered remote mode, selected probe 1, set xyLv')
         except CA410Error:
             self._serial.close()
             self._serial = None
@@ -124,7 +136,6 @@ class CA410Driver:
         resp = self._read_response()
         self._check_ok(resp)
         self._current_mode = mode
-        import time
         time.sleep(0.1)
         logger.info('Mode set to %s', mode.name)
 
@@ -134,6 +145,21 @@ class CA410Driver:
         self._send_command('MES')
         resp = self._read_response()
         logger.info('Measurement response: %s', resp)
+
+        # If MES returns ER10 (undefined command), the device likely lost
+        # its measurement-mode state.  Re-send MDS and retry once.
+        if resp.startswith('ER10'):
+            logger.warning('MES returned ER10 — re-sending MDS and retrying')
+            mode = self._current_mode or MeasurementMode.XY_LV
+            self._send_command(f'MDS,{mode.value}')
+            mds_resp = self._read_response()
+            self._check_ok(mds_resp)
+            self._current_mode = mode
+            time.sleep(0.2)
+            self._send_command('MES')
+            resp = self._read_response()
+            logger.info('Retry measurement response: %s', resp)
+
         return self._parse_measurement(resp)
 
     def zero_calibrate(self) -> None:
