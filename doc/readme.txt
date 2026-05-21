@@ -1,0 +1,1 @@
+打包命令：python -m PyInstaller CA410Reader.spec --clean --noconfirm

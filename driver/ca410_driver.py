@@ -14,9 +14,9 @@ class CA410Driver:
     """Low-level driver for Konica Minolta CA-410 via CA-S40 serial protocol."""
 
     BAUDRATE = 38400
-    BYTESIZE = serial.SEVENBITS
-    PARITY = serial.PARITY_EVEN
-    STOPBITS = serial.STOPBITS_TWO
+    BYTESIZE = serial.EIGHTBITS
+    PARITY = serial.PARITY_NONE
+    STOPBITS = serial.STOPBITS_ONE
     TIMEOUT = 2.0
 
     def __init__(self, port: str | None = None):
@@ -57,7 +57,7 @@ class CA410Driver:
                 bytesize=self.BYTESIZE,
                 parity=self.PARITY,
                 stopbits=self.STOPBITS,
-                rtscts=True,
+                rtscts=False,
                 dsrdtr=False,
                 timeout=self.TIMEOUT,
                 write_timeout=self.TIMEOUT,
@@ -79,12 +79,15 @@ class CA410Driver:
             # longer before sending the next command.
             time.sleep(0.5)
 
-            # Select probe 1.  Without PSC the device may not accept MES
-            # on fresh power-on — the official tool always sends PSC.
-            self._send_command('PSC,1')
-            resp = self._read_response()
-            self._check_ok(resp)
-            time.sleep(0.1)
+            # Select probe 1.  Single-probe CA-410 units do not support PSC
+            # and return ER10 — skip silently in that case.
+            try:
+                self._send_command('PSC,1')
+                resp = self._read_response()
+                self._check_ok(resp)
+                time.sleep(0.1)
+            except UndefinedCommandError:
+                logger.info('PSC not supported (single-probe unit), skipping')
 
             # Set measurement display mode.  The device does NOT default
             # to any specific mode after COM,1 — if MDS is not sent, MES
@@ -95,7 +98,20 @@ class CA410Driver:
             self._current_mode = MeasurementMode.XY_LV
             time.sleep(0.2)
 
-            logger.info('Entered remote mode, selected probe 1, set xyLv')
+            # Zero calibration is required after power-on before MES can
+            # execute.  The official SDK performs this automatically during
+            # connection.  If the probe cap is off, ZRC may fail — that's
+            # acceptable; the user can calibrate manually later.
+            try:
+                self._send_command('ZRC')
+                resp = self._read_response()
+                self._check_ok(resp)
+                time.sleep(0.3)
+                logger.info('Zero calibration completed during connection')
+            except CA410Error as e:
+                logger.warning('Zero calibration skipped: %s', e)
+
+            logger.info('Connected: remote mode, xyLv, zero cal')
         except CA410Error:
             self._serial.close()
             self._serial = None
@@ -146,19 +162,19 @@ class CA410Driver:
         resp = self._read_response()
         logger.info('Measurement response: %s', resp)
 
-        # If MES returns ER10 (undefined command), the device likely lost
-        # its measurement-mode state.  Re-send MDS and retry once.
+        # If MES returns ER10, zero calibration is likely required.
         if resp.startswith('ER10'):
-            logger.warning('MES returned ER10 — re-sending MDS and retrying')
-            mode = self._current_mode or MeasurementMode.XY_LV
-            self._send_command(f'MDS,{mode.value}')
-            mds_resp = self._read_response()
-            self._check_ok(mds_resp)
-            self._current_mode = mode
-            time.sleep(0.2)
-            self._send_command('MES')
-            resp = self._read_response()
-            logger.info('Retry measurement response: %s', resp)
+            logger.warning('MES returned ER10 — attempting zero calibration')
+            try:
+                self._send_command('ZRC')
+                zrc_resp = self._read_response()
+                self._check_ok(zrc_resp)
+                time.sleep(0.3)
+                self._send_command('MES')
+                resp = self._read_response()
+                logger.info('Measurement after ZRC: %s', resp)
+            except CA410Error:
+                raise CA410Error('测量失败：请盖上探头盖执行零点校准后再测量')
 
         return self._parse_measurement(resp)
 
