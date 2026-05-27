@@ -13,7 +13,7 @@ class TestCase:
     test_id: str                # 编号, e.g. "T001"
     image_mode: str             # 图像模式
     peak_brightness: str        # 峰值亮度
-    backlight_value: float      # 当前背光值
+    backlight_value: str        # 对比度增强
     local_dimming: str          # Local Dimming
     window_size: float          # 小窗口大小 (%), e.g. 10, 50, 100
     hdr_sdr: str                # HDR/SDR
@@ -34,7 +34,7 @@ def load_test_cases(filepath: str | Path) -> list[TestCase]:
         Col 1: 编号
         Col 2: 图像模式
         Col 3: 峰值亮度
-        Col 4: 当前背光值
+        Col 4: 对比度增强
         Col 5: Local Dimming
         Col 6: 小窗口大小 (e.g. "10%", "50%", "100%")
         Col 7: HDR/SDR
@@ -53,7 +53,7 @@ def load_test_cases(filepath: str | Path) -> list[TestCase]:
 
         image_mode = _str(ws.cell(row=row, column=2).value)
         peak_brightness = _str(ws.cell(row=row, column=3).value)
-        backlight_value = _num(ws.cell(row=row, column=4).value, default=100)
+        backlight_value = _str(ws.cell(row=row, column=4).value)
         local_dimming = _str(ws.cell(row=row, column=5).value)
         window_size = _parse_percent(ws.cell(row=row, column=6).value)
         hdr_sdr = _str(ws.cell(row=row, column=7).value)

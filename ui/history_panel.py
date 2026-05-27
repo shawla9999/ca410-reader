@@ -5,7 +5,7 @@ from driver.ca410_types import MeasurementMode, TduvLvResult, XyLvResult, MODE_L
 
 # CSV headers match Excel "测试用例" sheet exactly
 CSV_HEADERS = [
-    '编号', '图像模式', '峰值亮度', '当前背光值', 'Local Dimming',
+    '编号', '图像模式', '峰值亮度', '对比度增强', 'Local Dimming',
     '小窗口大小', 'HDR/SDR', '白块亮度(nit)',
     'Lv (cd/m²)', 'x', 'y', '备注'
 ]
@@ -35,7 +35,7 @@ class HistoryPanel(ttk.LabelFrame):
         self._tree.heading('no', text='编号')
         self._tree.heading('image_mode', text='图像模式')
         self._tree.heading('peak_brightness', text='峰值亮度')
-        self._tree.heading('backlight_value', text='当前背光值')
+        self._tree.heading('backlight_value', text='对比度增强')
         self._tree.heading('local_dimming', text='Local Dimming')
         self._tree.heading('window_size', text='小窗口大小')
         self._tree.heading('hdr_sdr', text='HDR/SDR')
@@ -89,7 +89,7 @@ class HistoryPanel(ttk.LabelFrame):
 
         img_mode = result.image_mode if result.image_mode else ''
         peak = result.peak_brightness if result.peak_brightness else ''
-        bl_val = f'{result.backlight_value:.0f}' if result.backlight_value is not None else ''
+        bl_val = result.backlight_value if result.backlight_value else ''
         ld = result.local_dimming if result.local_dimming else ''
         w_size = f'{result.window_ratio:.0f}%' if result.window_ratio is not None else ''
         hdr = result.hdr_sdr if result.hdr_sdr else ''
@@ -109,7 +109,7 @@ class HistoryPanel(ttk.LabelFrame):
             '编号': f'T{self._count:03d}',
             '图像模式': img_mode,
             '峰值亮度': peak,
-            '当前背光值': bl_val,
+            '对比度增强': bl_val,
             'Local Dimming': ld,
             '小窗口大小': w_size,
             'HDR/SDR': hdr,

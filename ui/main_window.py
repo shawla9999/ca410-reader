@@ -153,7 +153,7 @@ class MainWindow:
             '编号': '',
             '图像模式': result.image_mode or '',
             '峰值亮度': result.peak_brightness or '',
-            '当前背光值': f'{result.backlight_value:.0f}' if result.backlight_value is not None else '',
+            '对比度增强': result.backlight_value or '',
             'Local Dimming': result.local_dimming or '',
             '小窗口大小': f'{result.window_ratio:.0f}%' if result.window_ratio is not None else '',
             'HDR/SDR': result.hdr_sdr or '',
@@ -373,7 +373,7 @@ class MainWindow:
                 baudrate = self._murideo_panel.get_murideo_serial_baudrate()
                 self._murideo.configure_serial(port, baudrate)
                 self._murideo.connect()
-                self._queue.put((MURIDEO_CONNECTED, port))
+                self._queue.put((MURIDEO_CONNECTED, f'{port} @ {baudrate}'))
             else:
                 self._murideo.connect(host)
                 self._queue.put((MURIDEO_CONNECTED, host))
@@ -551,7 +551,7 @@ class MainWindow:
             '',
             f'  图像模式: {case.image_mode}',
             f'  峰值亮度: {case.peak_brightness}',
-            f'  背光值: {case.backlight_value:.0f}',
+            f'  对比度增强: {case.backlight_value}',
             f'  Local Dimming: {case.local_dimming}',
         ]
         if messagebox.askokcancel('TV 参数确认', '\n'.join(lines)):

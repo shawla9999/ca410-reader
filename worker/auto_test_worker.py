@@ -63,7 +63,7 @@ def profile_to_test_cases(profile: TestProfile) -> list[TestCase]:
             test_id=f'P{i + 1:03d}',
             image_mode='',
             peak_brightness='',
-            backlight_value=0,
+            backlight_value='',
             local_dimming='',
             window_size=resolved.get('window_size', 100),
             hdr_sdr=hdr_sdr,

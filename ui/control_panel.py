@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, filedialog
 
-from driver.ca410_types import MeasurementMode, IMAGE_MODES, PEAK_BRIGHTNESS_MODES, LOCAL_DIMMING_MODES, HDR_SDR_MODES
+from driver.ca410_types import MeasurementMode, IMAGE_MODES, PEAK_BRIGHTNESS_MODES, CONTRAST_ENHANCE_MODES, LOCAL_DIMMING_MODES, HDR_SDR_MODES
 from ui.fonts import cjk_family
 from worker import measurement_worker as mw
 from util.profile import load_profile, list_profiles
@@ -62,12 +62,13 @@ class ControlPanel(ttk.LabelFrame):
         ttk.Combobox(row1, textvariable=self._peak_brightness_var,
                       values=PEAK_BRIGHTNESS_MODES, width=4, state='readonly').pack(side=tk.LEFT, padx=4)
 
-        # Backlight + Local Dimming on same row
+        # 对比度增强 + Local Dimming on same row
         row2 = ttk.Frame(tv_frame)
         row2.pack(fill=tk.X, padx=4, pady=1)
-        ttk.Label(row2, text='背光值:').pack(side=tk.LEFT)
-        self._backlight_var = tk.StringVar(value='')
-        ttk.Entry(row2, textvariable=self._backlight_var, width=6).pack(side=tk.LEFT, padx=4)
+        ttk.Label(row2, text='对比度增强:').pack(side=tk.LEFT)
+        self._backlight_var = tk.StringVar(value=CONTRAST_ENHANCE_MODES[0])
+        ttk.Combobox(row2, textvariable=self._backlight_var,
+                      values=CONTRAST_ENHANCE_MODES, width=6).pack(side=tk.LEFT, padx=4)
         ttk.Label(row2, text='LD:').pack(side=tk.LEFT, padx=(8, 0))
         self._local_dimming_var = tk.StringVar(value=LOCAL_DIMMING_MODES[0])
         ttk.Combobox(row2, textvariable=self._local_dimming_var,
@@ -197,12 +198,8 @@ class ControlPanel(ttk.LabelFrame):
     def get_peak_brightness(self) -> str:
         return self._peak_brightness_var.get()
 
-    def get_backlight_value(self) -> float | None:
-        try:
-            val = float(self._backlight_var.get())
-            return val if val >= 0 else None
-        except ValueError:
-            return None
+    def get_backlight_value(self) -> str:
+        return self._backlight_var.get()
 
     def get_local_dimming(self) -> str:
         return self._local_dimming_var.get()
@@ -240,7 +237,7 @@ class ControlPanel(ttk.LabelFrame):
     def set_test_case_fields(self, case) -> None:
         self._image_mode_var.set(case.image_mode)
         self._peak_brightness_var.set(case.peak_brightness)
-        self._backlight_var.set(f'{case.backlight_value:.0f}')
+        self._backlight_var.set(case.backlight_value)
         self._local_dimming_var.set(case.local_dimming)
         self._note_var.set(case.note)
 

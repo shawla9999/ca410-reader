@@ -16,7 +16,7 @@ COL_MAP = {
     '编号': 1,
     '图像模式': 2,
     '峰值亮度': 3,
-    '当前背光值': 4,
+    '对比度增强': 4,
     'Local Dimming': 5,
     '小窗口大小': 6,
     'HDR/SDR': 7,
@@ -28,7 +28,7 @@ COL_MAP = {
 }
 
 # Keys used for matching a measurement to a test case row
-MATCH_KEYS = ['图像模式', '峰值亮度', '当前背光值', 'Local Dimming', '小窗口大小', 'HDR/SDR', '白块亮度(nit)']
+MATCH_KEYS = ['图像模式', '峰值亮度', '对比度增强', 'Local Dimming', '小窗口大小', 'HDR/SDR', '白块亮度(nit)']
 
 EXTRA_SHEET = '额外数据'
 
@@ -124,7 +124,7 @@ def _append_extra(ws, record: dict) -> None:
             val = float(val)
         elif key in ('x', 'y') and val:
             val = float(val)
-        elif key in ('当前背光值', '白块亮度(nit)') and val:
+        elif key in ('白块亮度(nit)',) and val:
             try:
                 val = float(val)
                 if val == int(val):

@@ -198,7 +198,20 @@ class MurideoPanel(ttk.LabelFrame):
 
     def _refresh_serial_ports(self) -> None:
         ports = sorted(serial.tools.list_ports.comports(), key=lambda p: p.device)
-        values = [f'{p.device} - {p.description}' for p in ports]
+        values = []
+        for p in ports:
+            desc = p.description or ''
+            mfg = p.manufacturer or ''
+            # Tag known non-Murideo devices to help user avoid wrong port
+            tag = ''
+            dl = desc.lower()
+            ml = mfg.lower()
+            if ('measuring' in dl or 'konica' in dl or 'ca-410' in dl
+                    or 'ca-s40' in dl or 'konica' in ml):
+                tag = ' [CA-410]'
+            elif 'usb serial' in dl and 'murideo' not in dl:
+                tag = ' [USB Serial]'
+            values.append(f'{p.device} - {desc}{tag}')
         self._serial_port_combo['values'] = values
         if values:
             self._serial_port_combo.current(0)

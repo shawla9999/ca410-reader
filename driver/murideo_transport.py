@@ -299,10 +299,32 @@ class SerialTransport(MurideoTransport):
             )
             self._connected = True
             logger.info('Serial connected to %s @ %d', port, baudrate)
+            # Handshake: verify device is actually responding
+            try:
+                handshake_ok = self._handshake(timeout=3.0)
+                if not handshake_ok:
+                    logger.warning('Serial handshake failed: device not responding')
+            except Exception as e:
+                logger.warning('Serial handshake error: %s', e)
         except serial.SerialException as e:
             self._connected = False
             self._serial = None
             raise ConnectionError(f'无法打开串口 {port}: {e}') from e
+
+    def _handshake(self, timeout: float = 3.0) -> bool:
+        """Send a simple command to verify the Murideo device is responding.
+
+        Sends SENDSINGLE||111,0 (HDR=SDR) and checks for a valid
+        RESPONSE. Returns True on success, False on failure.
+        """
+        cmd = '\r\nSENDSINGLE||111,0\r\n'
+        resp = self.send_and_recv(cmd, timeout)
+        if resp and 'RESPONSE' in resp:
+            logger.info('Serial handshake OK: %s', repr(resp))
+            return True
+        logger.warning('Serial handshake failed: no valid response (got %s)',
+                        repr(resp))
+        return False
 
     def disconnect(self) -> None:
         if self._serial:

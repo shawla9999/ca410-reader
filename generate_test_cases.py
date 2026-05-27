@@ -45,7 +45,7 @@ for cell_ref, label, fill in section_labels:
 # Row 2: column headers
 headers = [
     # TV (A-E)
-    "编号", "图像模式", "峰值亮度", "当前背光值", "Local Dimming",
+    "编号", "图像模式", "峰值亮度", "对比度增强", "Local Dimming",
     # MURIDEO (F-H)
     "小窗口大小", "HDR/SDR", "白块亮度(nit)",
     # CA-410 (I-K)
@@ -124,7 +124,7 @@ for mode in IMAGE_MODES:
                     "编号": f"T{idx:03d}",
                     "图像模式": mode,
                     "峰值亮度": peak,
-                    "当前背光值": 100,
+                    "对比度增强": "中",
                     "Local Dimming": "关",
                     "窗口大小": f"{win}%",
                     "hdr_sdr": "HDR",
@@ -141,7 +141,7 @@ for mode in IMAGE_MODES:
                 "编号": f"T{idx:03d}",
                 "图像模式": mode,
                 "峰值亮度": peak,
-                "当前背光值": 100,
+                "对比度增强": "中",
                 "Local Dimming": "关",
                 "窗口大小": f"{win}%",
                 "hdr_sdr": "SDR",
@@ -159,7 +159,7 @@ for mode in IMAGE_MODES:
                 "编号": f"T{idx:03d}",
                 "图像模式": mode,
                 "峰值亮度": "强",
-                "当前背光值": 100,
+                "对比度增强": "中",
                 "Local Dimming": ld,
                 "窗口大小": f"{win}%",
                 "hdr_sdr": "HDR",
@@ -185,7 +185,7 @@ for tc in test_cases:
     ws.row_dimensions[row].height = 22
     values = [
         tc["编号"], tc["图像模式"], tc["峰值亮度"],
-        tc["当前背光值"], tc["Local Dimming"],
+        tc["对比度增强"], tc["Local Dimming"],
         tc["窗口大小"], tc["hdr_sdr"], tc["白块亮度"],
         "", "", "",  # Lv, x, y
         tc.get("note", "")
@@ -219,7 +219,7 @@ plan_items = [
     ("SDR测试", "图像模式: 鲜艳/标准/影院, 窗口: 1%-30%(1%间隔)+35%-100%(5%间隔), 峰值亮度: 关/弱/中/强\n3×44×4 = 528组"),
     ("LD×Boost测试", "图像模式: 鲜艳/标准/影院, 窗口: 10%/50%, 峰值亮度=强, LD: 弱/中/强, 白块: 100nit, HDR\n3×2×3 = 18组 (LD=关已含在HDR组中)"),
     ("总计", "2112 + 528 + 18 = 2658组"),
-    ("固定条件", "当前背光值=100; HDR/SDR组: LD=关; LD×Boost组: 峰值亮度=强, 白块亮度=100nit, HDR"),
+    ("固定条件", "对比度增强=中; HDR/SDR组: LD=关; LD×Boost组: 峰值亮度=强, 白块亮度=100nit, HDR"),
     ("每组测量次数", "1次"),
     ("操作要点1", "HDR时MURIDEO输出HDR10/PQ EOTF/BT.2020格式"),
     ("操作要点2", "SDR时MURIDEO输出BT.709/Gamma 2.2格式"),
@@ -254,7 +254,7 @@ for i, h in enumerate(ref_headers, 1):
 ref_data = [
     ("A: 图像模式", "鲜艳、标准、影院", "离散", "显示预设模式，不同模式对boost增益可能不同", "电视端"),
     ("B: 峰值亮度", "关、弱、中、强", "有序离散", "Boost峰值亮度档位", "电视端"),
-    ("C: 当前背光值", "100 (固定)", "连续", "背光PWM/亮度设置值，本次测试固定为100", "电视端"),
+    ("C: 对比度增强", "中 (固定)", "有序离散", "对比度增强档位，本次测试固定为中", "电视端"),
     ("D: Local Dimming", "关、弱、中、强", "有序离散", "HDR/SDR组固定为关；LD×Boost组测试弱/中/强与boost强的关系", "电视端"),
     ("E: 小窗口大小", "1%-30%(1%间隔)+35%-100%(5%间隔)=44级", "连续", "信号源输出测试图案窗口大小", "MURIDEO"),
     ("F: HDR/SDR", "HDR、SDR", "离散", "HDR: HDR10/PQ/BT.2020; SDR: BT.709/Gamma 2.2", "MURIDEO"),

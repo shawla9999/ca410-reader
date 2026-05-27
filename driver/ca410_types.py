@@ -19,6 +19,8 @@ IMAGE_MODES = ['标准', '影院', '电脑', '鲜艳']
 
 PEAK_BRIGHTNESS_MODES = ['关', '弱', '中', '强']
 
+CONTRAST_ENHANCE_MODES = ['关', '低', '中', '强']
+
 LOCAL_DIMMING_MODES = ['关', '弱', '中', '强']
 
 HDR_SDR_MODES = ['HDR', 'SDR']
@@ -34,7 +36,7 @@ class XyLvResult:
     window_ratio: float | None = None
     window_brightness: float | None = None
     peak_brightness: str = ''
-    backlight_value: float | None = None
+    backlight_value: str = ''
     local_dimming: str = ''
     hdr_sdr: str = ''
     note: str = ''
@@ -50,7 +52,7 @@ class TduvLvResult:
     window_ratio: float | None = None
     window_brightness: float | None = None
     peak_brightness: str = ''
-    backlight_value: float | None = None
+    backlight_value: str = ''
     local_dimming: str = ''
     hdr_sdr: str = ''
     note: str = ''

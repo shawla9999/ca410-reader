@@ -237,6 +237,41 @@ class MurideoDriver:
                 self._connected = True
                 logger.info('Connected to Murideo serial %s',
                             self._serial_config['port'])
+                # Verify device responds — warn if not
+                try:
+                    test_resp = self._transport.send_and_recv(
+                        '\r\nSENDSINGLE||111,0\r\n', timeout=3.0,
+                    )
+                    if test_resp and 'RESPONSE' in test_resp:
+                        logger.info('Serial handshake OK')
+                    elif test_resp and test_resp.startswith('ER'):
+                        # Likely connected to CA-410, not Murideo
+                        raise MurideoConnectionError(
+                            f'串口连接的似乎不是 Murideo（收到 {test_resp}），'
+                            f'请确认串口是否连接了 CA-410 色彩分析仪'
+                        )
+                    else:
+                        logger.warning('Serial handshake: device not responding')
+                        raise MurideoConnectionError(
+                            '串口已打开但设备无响应 — 请检查波特率是否正确，'
+                            '或确认Murideo已开机且串口线已连接'
+                        )
+                except MurideoConnectionError:
+                    raise
+                except Exception as e:
+                    logger.warning('Serial handshake error: %s', e)
+                    raise MurideoConnectionError(
+                        '串口已打开但无法与设备通信 — 请检查波特率和连接'
+                    )
+            except MurideoConnectionError:
+                self._connected = False
+                if self._transport:
+                    try:
+                        self._transport.disconnect()
+                    except Exception:
+                        pass
+                self._transport = None
+                raise
             except Exception as e:
                 self._connected = False
                 self._transport = None
@@ -329,7 +364,29 @@ class MurideoDriver:
         commands.append(f'\r\nSENDOTHER||{CAT_IRE_WINDOW},{ire},{window_size}\r\n')
         delays.append(0.7)
         try:
-            self._transport.send_batch(commands, delays, self.RECV_TIMEOUT)
+            responses = self._transport.send_batch(commands, delays, self.RECV_TIMEOUT)
+            # Validate responses — check if critical commands got replies
+            no_response_count = sum(1 for r in responses if r is None)
+            if no_response_count == len(responses):
+                raise MurideoTimeoutError(
+                    '设备无响应: 所有命令均未收到回复，请检查串口连接和波特率'
+                )
+            # Detect CA-410 error codes on wrong serial port
+            er_responses = [r for r in responses if r and r.startswith('ER')]
+            if er_responses:
+                raise MurideoCommandError(
+                    f'收到错误响应 {er_responses[0]} — 可能连接了错误的设备（如 CA-410），'
+                    f'请确认串口连接的是 Murideo 而非色彩分析仪'
+                )
+            if no_response_count > 0:
+                logger.warning('Murideo: %d/%d commands got no response',
+                               no_response_count, len(responses))
+            # Check IRE window command specifically (last command)
+            last_resp = responses[-1] if responses else None
+            if last_resp is None:
+                logger.warning('Murideo: IRE window command got no response')
+        except MurideoError:
+            raise
         except Exception as e:
             logger.error('Murideo IRE window error: %s', e)
             raise MurideoError(f'IRE窗口设置失败: {e}') from e
@@ -420,7 +477,22 @@ class MurideoDriver:
         """Send a command via the transport and wait for response."""
         self._ensure_connected()
         try:
-            return self._transport.send_and_recv(command, self.RECV_TIMEOUT)
+            resp = self._transport.send_and_recv(command, self.RECV_TIMEOUT)
+            if resp is None:
+                logger.warning('Murideo: no response for command %s',
+                               repr(command[:60]))
+                raise MurideoTimeoutError(
+                    '设备无响应: 请检查串口连接和波特率'
+                )
+            # Detect CA-410 error codes — wrong device on serial port
+            if resp.startswith('ER'):
+                raise MurideoCommandError(
+                    f'收到错误响应 {resp} — 可能连接了错误的设备（如 CA-410），'
+                    f'请确认串口连接的是 Murideo 而非色彩分析仪'
+                )
+            return resp
+        except MurideoError:
+            raise
         except ConnectionError as e:
             self._connected = False
             raise MurideoConnectionError(f'连接已断开: {e}') from e

@@ -44,7 +44,7 @@ for cell_ref, label, fill in section_labels:
 
 # Row 2: column headers
 headers = [
-    "编号", "图像模式", "峰值亮度", "当前背光值", "Local Dimming",
+    "编号", "图像模式", "峰值亮度", "对比度增强", "Local Dimming",
     "小窗口大小", "HDR/SDR", "白块亮度(nit)",
     "Lv (cd/m²)", "x", "y",
     "备注"
@@ -86,7 +86,7 @@ for mode in IMAGE_MODES:
                     "编号": f"T{idx:03d}",
                     "图像模式": mode,
                     "峰值亮度": peak,
-                    "当前背光值": 100,
+                    "对比度增强": "中",
                     "Local Dimming": "强",
                     "窗口大小": f"{win}%",
                     "hdr_sdr": "HDR",
@@ -104,7 +104,7 @@ for tc in test_cases:
     ws.row_dimensions[row].height = 22
     values = [
         tc["编号"], tc["图像模式"], tc["峰值亮度"],
-        tc["当前背光值"], tc["Local Dimming"],
+        tc["对比度增强"], tc["Local Dimming"],
         tc["窗口大小"], tc["hdr_sdr"], tc["白块亮度"],
         "", "", "",
         tc["note"]
@@ -132,7 +132,7 @@ plan_items = [
     ("信号源", "MURIDEO 8K SEVEN GENERATOR"),
     ("测量设备", "CA-410 色彩分析仪"),
     ("总计", f"1(图像模式) × 3(峰值亮度) × 4(亮度) × 21(窗口) = {len(test_cases)}组"),
-    ("固定条件", "当前背光值=100; Local Dimming=强; HDR"),
+    ("固定条件", "对比度增强=中; Local Dimming=强; HDR"),
     ("每组测量次数", "1次"),
     ("操作要点1", "HDR时MURIDEO输出HDR10/PQ EOTF/BT.2020格式"),
     ("操作要点2", "每次切换参数后等待3秒，确保屏幕稳定"),
@@ -164,7 +164,7 @@ for i, h in enumerate(ref_headers, 1):
 ref_data = [
     ("A: 图像模式", "标准", "离散", "显示预设模式", "电视端"),
     ("B: 峰值亮度", "高、中、低", "有序离散", "峰值亮度档位", "电视端"),
-    ("C: 当前背光值", "100 (固定)", "连续", "背光PWM/亮度设置值，本次测试固定为100", "电视端"),
+    ("C: 对比度增强", "中 (固定)", "有序离散", "对比度增强档位，本次测试固定为中", "电视端"),
     ("D: Local Dimming", "强 (固定)", "有序离散", "本次测试固定为强", "电视端"),
     ("E: 小窗口大小", "0%-100%(5%间隔)=21级", "连续", "信号源输出测试图案窗口大小", "MURIDEO"),
     ("F: HDR/SDR", "HDR (固定)", "离散", "HDR10/PQ/BT.2020", "MURIDEO"),
